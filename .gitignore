@@ -1,0 +1,7 @@
+__pycache__/
+.DS_Store
+batch_accuracy
+examples
+obsolete
+theoretical_result
+
