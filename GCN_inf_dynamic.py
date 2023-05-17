@@ -1,16 +1,33 @@
-# import sys
-# sys.path.append("..")
+from tqdm import tqdm
 
 from GCN import *
 from utils import *
-
 from theoretical_est import EdgelistToGraph, Mergable
 
-
 @torch.no_grad()
-def inference_with_intermediate_value(model, data, folder:str, prefix:str) :
+def inference_with_intermediate_value(model, data:Union[pyg.data.Data, pyg.loader.NeighborLoader], folder:str, prefix:str) :
+    # Could be pyg.Data or NeighbourLoader
     model.eval()
-    out, result_each_layer = model(data.x, data.edge_index, data.edge_attr)
+    if isinstance(data, pyg.data.Data):
+        print("Using Full Data")
+        _, result_each_layer = model(data.x, data.edge_index, data.edge_attr)
+
+    elif isinstance(data, pyg.loader.NeighborLoader):
+        print("Using Neighbour Loader")
+        # inference batches with loader. 不然会因为batch sampling的randomness导致不匹配。
+        result_each_layer = {}
+        for batch in tqdm(data) :
+            batch = batch.to(device, 'edge_index')
+            batch_size = batch.batch_size
+            _, batch_result_each_layer = model(batch.x, batch.edge_index)  # 虽然不是很懂，但是copy-paste来的是这样的
+            for layer in batch_result_each_layer:
+                if layer not in result_each_layer:
+                    result_each_layer[layer] = np.array([])
+                # 把batch_result_each_layer 按照batch.input_id  concate在一起。
+                result_each_layer[layer] = concate_by_id(result_each_layer[layer],
+                                                      batch_result_each_layer[layer][:batch_size],
+                                                      batch.input_id) # Global node index of each node in batch.
+
     for layer in result_each_layer:
         np.save(osp.join(root, "dynamic", "examples", folder, prefix+f"_{layer}.npy"), result_each_layer[layer])
     return result_each_layer.keys()
@@ -24,7 +41,7 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     print_dataset(dataset)
-    data = dataset[0].__copy__().to(device)
+    data = dataset[0].to(device)
     # add_mask(data)  # inference doesnt need mask
     print_data(data)
     use_loader = is_large(data)
@@ -50,11 +67,11 @@ def main():
         if not use_loader:
             inference_with_intermediate_value(model, data, out_folder, "final")
         else:
-            # todo: Use data loader for the whole graph and test.
-            pass
+            loader = data_loader(data, num_layers=2, num_neighbour_per_layer=-1, separate=False) # load all neighbours
+            inference_with_intermediate_value(model, loader, out_folder, "final")
 
         batch_size = int(args.perbatch / 100 * data.num_edges) # perbatch is [x]%, so divide by 100
-        print(f"Batch size: {batch_size}")
+        print(f"Batch size for streaming graph: {batch_size}")
 
         # edge selection according to args.distribution
         sample_edges, initial_edges = edge_remove(data.edge_index.numpy(), batch_size, args.distribution, data.is_directed())
@@ -68,14 +85,16 @@ def main():
         theoretical_affected['conv1'] = fetched_vertex_affected_merged[0]  # affected next layer equals to fetched previous layer
         theoretical_affected['conv2'] = fetched_vertex_affected_merged[1]
 
-        ## 3. run inference for the initial graph (before edge adding). save rthe intermediate value for each layer and each node as the initial result
-        data2 = dataset[0].__copy__().to(device)
+        ## 3. run inference for the initial graph (before edge adding). save the intermediate value for each layer and each node as the initial result
+        # data2 = dataset[0].__copy__().to(device)
+        data2 = data  # the bulky data.x is not changed, directly change edge index on the same varaible. They are not used together.
         data2.edge_index = initial_edges  # todo: 不是很确定这里改变了edge_index后，会不会产生isolated node，进而影响后面的判断（by index)？
 
         if not use_loader :
             layer_names = inference_with_intermediate_value(model, data2, out_folder, "initial")
-        else: # todo:
-            pass
+        else:
+            loader = data_loader(data2, num_layers=2, num_neighbour_per_layer=-1, separate=False) # select all
+            layer_names = inference_with_intermediate_value(model, loader, out_folder, "initial")
 
         ## 4. load the two files\arrays and compare. calculate different rate at number level and node level. Different rate indicates the affected area (value changed)
         print(f"dataset: {args.dataset}    batch size: {batch_size}    aggregator: {args.aggr}    directed: {data.is_directed()}")

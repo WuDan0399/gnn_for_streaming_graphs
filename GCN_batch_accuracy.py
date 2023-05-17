@@ -5,7 +5,9 @@
 ##  Meanwhile, large batch could lead to severe accurarcy drop.
 ##  This script aims to investigate the balance between batch size, accuracy and computation.
 
-from GCN import *
+import GCN as myGCN
+import GCN_neighbor_loader as GCN_w_loader
+from utils import *
 
 
 def main():
@@ -13,13 +15,12 @@ def main():
     parser = argparse.ArgumentParser()
     args = general_parser(parser)
     dataset = load_dataset(args)
-    data = dataset[0]
+    data = dataset[0]  # Only non-mem-costly edge_index changes, keep a copy of edge index and reuse the same variable
+    full_edge_index = data.edge_index.detach()
 
     use_loader = is_large(data)
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-    model = GCN(dataset.num_features, args.hidden_channels, dataset.num_classes, args).to(device)
+    model = myGCN.GCN(dataset.num_features, args.hidden_channels, dataset.num_classes, args).to(device)
 
     ## Get available model
     available_model = []
@@ -37,7 +38,7 @@ def main():
 
         ## different content starts from here
         maximum_batch_size = 0.005
-        num_steps = 100
+        num_steps = 3
         num_edges = dataset[0].num_edges
         num_nodes = dataset[0].num_nodes
         batch_sizes = np.linspace(0, maximum_batch_size*num_edges, num_steps)
@@ -45,18 +46,19 @@ def main():
         batch_sizes = np.unique(batch_sizes)  # avoid repeated computation in case the graph is too small and batch_size do not increase
         false_per_batch = np.zeros(batch_sizes.shape)
         for i, batch_size in enumerate(batch_sizes):
-            # todo: change to choose by args.distribution
-            # index_added_edges = np.random.choice(num_edges, batch_size, replace=False)
-            sample_edges, initial_edges = edge_remove(data.edge_index.numpy(), batch_size, args.distribution,
+            # choose edges in batch by args.distribution
+            _, initial_edges = edge_remove(full_edge_index.numpy(), batch_size, args.distribution,
                                                       data.is_directed())
-
-            # initial_edges = data.edge_index[:, np.setdiff1d(np.arange(num_edges), index_added_edges)]
-            data_one_batch_missing = dataset[0].__copy__().to(device)
-            data_one_batch_missing.edge_index = initial_edges  # todo: 不是很确定这里改变了edge_index后，会不会产生isolated node，进而影响后面的判断（by index)？
+            initial_edges = torch.from_numpy(initial_edges).to(device)  # from numpy to torch tensor
+            data.edge_index = initial_edges  # todo: 不是很确定这里改变了edge_index后，会不会产生isolated node，进而影响后面的判断（by index)？
             if not use_loader :
-                acc = test_all(model, data_one_batch_missing)  # dump the whole graph as input, no masking
+                acc = myGCN.test_all(model, data)  # dump the whole graph as input, no masking
             else:  # todo: change to use data loader for testing. No need for test all?
-                pass
+                loader = data_loader(data, num_layers=2, num_neighbour_per_layer=-1,
+                                     separate=False)  # load all neighbours
+                # todo: 这里应该去看Hub Node 还是看全部的node？
+                acc = GCN_w_loader.test(model, loader)
+
             false_per_batch[i] = acc * num_nodes
 
         fig, ax = plt.subplots()

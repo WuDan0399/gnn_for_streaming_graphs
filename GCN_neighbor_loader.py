@@ -1,21 +1,21 @@
 #################################################################################
 #  Original Code from:
 #  https://github.com/pyg-team/pytorch_geometric/blob/master/examples/gcn.py
+#  Data Loader from:
+#  https://github.com/pyg-team/pytorch_geometric/blob/master/examples/hetero/to_hetero_mag.py
 #################################################################################
 
 import torch.nn.functional as F
 import torch_geometric.transforms as T
 
 from torch_geometric.logging import init_wandb, log
-from torch_geometric.nn import GCNConv
-from torch_geometric.loader import NeighborLoader
 
 from tqdm import tqdm
 from utils import *
 from GCN import GCN
 
 
-def train(model, train_loader, optimizer, device) :
+def train(model, train_loader, optimizer) :
     model.train()
 
     total_examples = total_loss = 0
@@ -23,7 +23,7 @@ def train(model, train_loader, optimizer, device) :
         optimizer.zero_grad()
         batch = batch.to(device, 'edge_index')
         batch_size = batch.batch_size
-        out, _ = model(batch.x, batch.edge_index)[:batch_size]
+        out, _ = model(batch.x, batch.edge_index)
         loss = F.cross_entropy(out[:batch_size], batch.y[:batch_size])
         loss.backward()
         optimizer.step()
@@ -35,7 +35,7 @@ def train(model, train_loader, optimizer, device) :
 
 
 @torch.no_grad()
-def test(model, loader, device) :
+def test(model, loader) :
     model.eval()
 
     total_examples = total_correct = 0
@@ -61,7 +61,6 @@ def main():
     args = general_parser(parser)
     dataset = load_dataset(args)
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     init_wandb(name=f'GCN-{args.dataset}', lr=args.lr, epochs=args.epochs,
                hidden_channels=args.hidden_channels, device=device)
 
@@ -70,14 +69,7 @@ def main():
     add_mask(data)
     print_data(data)
 
-
-    kwargs = {'batch_size' : 128, 'num_workers' : 6, 'persistent_workers' : True}
-    train_loader = NeighborLoader(data, num_neighbors=[10] * 2, shuffle=True,
-                                  input_nodes=data.train_mask, **kwargs)
-    val_loader = NeighborLoader(data, num_neighbors=[10] * 2,
-                                input_nodes=data.val_mask, **kwargs)
-    test_loader = NeighborLoader(data, num_neighbors=[10] * 2,
-                                input_nodes=data.test_mask, **kwargs)
+    train_loader, val_loader, test_loader = data_loader(data, num_layers=2, num_neighbour_per_layer=10, separate=True)
 
     model = GCN(dataset.num_features, args.hidden_channels, dataset.num_classes, args)
     model, data = model.to(device), data.to(device)
@@ -111,8 +103,8 @@ def main():
         patience = args.patience
         it_patience = 0
         for epoch in range(1, args.epochs + 1) :
-            loss = train(model, train_loader, optimizer, device)
-            val_acc = test(model, val_loader, device)
+            loss = train(model, train_loader, optimizer)
+            val_acc = test(model, val_loader)
             log(Epoch=epoch, Loss=loss, Val=val_acc)
             if best_test_acc < val_acc:
                 best_test_acc = val_acc
@@ -130,7 +122,7 @@ def main():
                     len(re.findall("[0-1]\.[0-9]+", model_name)) != 0]
         index_best_model = np.argmax(accuracy)
         model = load(model, available_model[index_best_model])
-        test_acc = test(model, test_loader, device)
+        test_acc = test(model, test_loader)
         print(f'Test: {test_acc:.4f}')
 
         available_model.pop(index_best_model)

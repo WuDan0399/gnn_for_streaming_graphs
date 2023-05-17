@@ -65,7 +65,6 @@ def main():
     args = general_parser(parser)
     dataset = load_dataset(args)
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     init_wandb(name=f'GCN-{args.dataset}', lr=args.lr, epochs=args.epochs,
                hidden_channels=args.hidden_channels, device=device)
 
