@@ -29,7 +29,10 @@ def main():
         if re.match(name_prefix + "_[0-9]+_[0-1]\.[0-9]+\.pt", file) :
             available_model.append(file)
     if len(available_model) == 0 :  # no available model, train from scratch
-        print(f"No available model. Please run `python GCN.py --dataset {args.dataset} --aggr {args.aggr}`")
+        if not use_loader:
+            print(f"No available model. Please run `python GCN.py --dataset {args.dataset} --aggr {args.aggr}`")
+        else:
+            print(f"No available model. Please run `python GCN_neighbor_loader.py --dataset {args.dataset} --aggr {args.aggr}`")
     else :  # choose the model with the highest test acc
         accuracy = [float(re.findall("[0-1]\.[0-9]+", model_name)[0]) for model_name in available_model if
                     len(re.findall("[0-1]\.[0-9]+", model_name)) != 0]
@@ -38,7 +41,7 @@ def main():
 
         ## different content starts from here
         maximum_batch_size = 0.005
-        num_steps = 3
+        num_steps = 100
         num_edges = dataset[0].num_edges
         num_nodes = dataset[0].num_nodes
         batch_sizes = np.linspace(0, maximum_batch_size*num_edges, num_steps)

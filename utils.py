@@ -15,8 +15,8 @@ from torch_geometric.loader import NeighborLoader
 np.random.seed(0)
 torch.manual_seed(0)
 
-# root = os.getenv("DYNAMIC_GNN_ROOT")
-root = "/Users/wooden/PycharmProjects/GNNAccEst"
+root = os.getenv("DYNAMIC_GNN_ROOT")
+# root = "/Users/wooden/PycharmProjects/GNNAccEst"
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
@@ -147,8 +147,10 @@ def load_dataset(args: argparse.Namespace) :
         dataset = CitationFull(osp.join(root, "datasets", "CitationFull"), "Cora")
     elif args.dataset == "yelp" :  # tasks Non one-hot
         dataset = Yelp(osp.join(root, "datasets", "Yelp"))
-    elif args.dataset == "amazon" :  # class
+    elif args.dataset == "amazon" :  # class, but on-hot representation
         dataset = AmazonProducts(osp.join(root, "datasets", "Amazon"))
+        for data in dataset : # Actually only one data
+            data.y = data.y.argmax(dim=-1)
 
     return dataset
 

@@ -25,7 +25,7 @@ def inference_with_intermediate_value(model, data:Union[pyg.data.Data, pyg.loade
                     result_each_layer[layer] = np.array([])
                 # 把batch_result_each_layer 按照batch.input_id  concate在一起。
                 result_each_layer[layer] = concate_by_id(result_each_layer[layer],
-                                                      batch_result_each_layer[layer][:batch_size],
+                                                      batch_result_each_layer[layer][:batch_size].cpu(),
                                                       batch.input_id) # Global node index of each node in batch.
 
     for layer in result_each_layer:
