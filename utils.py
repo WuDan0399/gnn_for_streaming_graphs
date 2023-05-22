@@ -15,8 +15,8 @@ from torch_geometric.loader import NeighborLoader
 np.random.seed(0)
 torch.manual_seed(0)
 
-root = os.getenv("DYNAMIC_GNN_ROOT")
-# root = "/Users/wooden/PycharmProjects/GNNAccEst"
+# root = os.getenv("DYNAMIC_GNN_ROOT")
+root = "/Users/wooden/PycharmProjects/GNNAccEst"
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
@@ -27,7 +27,7 @@ def save(model_state_dict, epoch, acc, name) -> None :
 def load(model, file_name: str) :
     print(f"Loading model {file_name} ...")
     model_path = osp.join(root, "dynamic", "examples", "trained_model", file_name)
-    model.load_state_dict(torch.load(model_path))
+    model.load_state_dict(torch.load(model_path, map_location=device))
     return model
 
 
@@ -73,8 +73,9 @@ def add_mask(data: pyg.data.Data) -> None :
                                               test_ratio else False for x in rand_choice], dtype=torch.bool)
 
 
+
 def data_loader(data, num_layers:int = 2, num_neighbour_per_layer:int = -1, separate: bool = True) :
-    kwargs = {'batch_size': 64, 'num_workers' : 6, 'persistent_workers' : True}
+    kwargs = {'batch_size': 1, 'num_workers': 1, 'persistent_workers' : True}
     if separate :
         train_loader = NeighborLoader(data, num_neighbors=[num_neighbour_per_layer] * num_layers, shuffle=True,
                                       input_nodes=data.train_mask, **kwargs)
@@ -112,7 +113,7 @@ def print_data(data: pyg.data.Data) -> None :
 
 
 def general_parser(parser: argparse.ArgumentParser) -> argparse.Namespace :
-    parser.add_argument("-d", '--dataset', type=str, default='Cora')
+    parser.add_argument("-d", '--dataset', type=str, default='amazon')
 
     parser.add_argument('--hidden_channels', type=int, default=16)
     parser.add_argument('--lr', type=float, default=0.01)
@@ -149,9 +150,11 @@ def load_dataset(args: argparse.Namespace) :
         dataset = Yelp(osp.join(root, "datasets", "Yelp"))
     elif args.dataset == "amazon" :  # class, but on-hot representation
         dataset = AmazonProducts(osp.join(root, "datasets", "Amazon"))
-        for data in dataset : # Actually only one data
-            data.y = data.y.argmax(dim=-1)
-
+        # for data in dataset : # Actually only one data
+        #     data.y = data.y.type(torch.float64)
+        #     data.y = data.y.argmax(dim=-1)
+    else:
+        print("No such dataset. Available: Cora/cora/PubMed/reddit/yelp/amazon")
     return dataset
 
 
@@ -232,7 +235,7 @@ def edge_remove(full_edges: np.ndarray, batch_size:int, distribution: str, direc
 
 
 def is_large(data) :
-    return True if data.num_nodes > 500 else False
+    return True if data.num_nodes > 5000 else False
 
 
 def concate_by_id(full: np.ndarray, batch: np.ndarray, position: np.ndarray) -> np.ndarray :

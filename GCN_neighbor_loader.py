@@ -67,6 +67,8 @@ def main():
     print_dataset(dataset)
     data = dataset[0]
     add_mask(data)
+    data.y = data.y.type(torch.float64) # for amazon dataset, the y is int rather than float
+
     print_data(data)
 
     train_loader, val_loader, test_loader = data_loader(data, num_layers=2, num_neighbour_per_layer=10, separate=True)

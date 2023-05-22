@@ -43,7 +43,7 @@ def main():
     print_dataset(dataset)
     data = dataset[0].to(device)
     # add_mask(data)  # inference doesnt need mask
-    print_data(data)
+    # print_data(data)
     use_loader = is_large(data)
 
     model = GCN(dataset.num_features, args.hidden_channels, dataset.num_classes, args).to(device)
