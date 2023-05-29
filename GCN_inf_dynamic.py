@@ -4,6 +4,7 @@ from GCN import *
 from utils import *
 from theoretical_est import EdgelistToGraph, Mergable
 
+@measure_time
 @torch.no_grad()
 def inference_with_intermediate_value(model, data:Union[pyg.data.Data, pyg.loader.NeighborLoader], folder:str, prefix:str) :
     # Could be pyg.Data or NeighbourLoader
@@ -16,7 +17,7 @@ def inference_with_intermediate_value(model, data:Union[pyg.data.Data, pyg.loade
         print("Using Neighbour Loader")
         # inference batches with loader. 不然会因为batch sampling的randomness导致不匹配。
         result_each_layer = {}
-        for batch in tqdm(data) :
+        for batch in tqdm(data):
             batch = batch.to(device, 'edge_index')
             batch_size = batch.batch_size
             _, batch_result_each_layer = model(batch.x, batch.edge_index)  # 虽然不是很懂，但是copy-paste来的是这样的
@@ -34,10 +35,16 @@ def inference_with_intermediate_value(model, data:Union[pyg.data.Data, pyg.loade
 
 def main():
     out_folder = "out_each_layer"
+    clean_command = "rm -rf " + osp.join(root, "dynamic", "examples", out_folder) + "/*.npy"
+    os.system(clean_command)
+
     parser = argparse.ArgumentParser()
     args = general_parser(parser)
-    dataset = load_dataset(args)
+    prefix_final = "_".join(["final", args.dataset, args.aggr, args.distribution])
+    prefix_initial = "_".join(["initial", args.dataset, args.aggr, args.distribution])
 
+
+    dataset = load_dataset(args)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     print_dataset(dataset)
@@ -65,21 +72,21 @@ def main():
 
         ## 1. run inference for whole graph (edge added). save the intermediate value for each layer and each node as the final targeted result.
         if not use_loader:
-            inference_with_intermediate_value(model, data, out_folder, "final")
+            inference_with_intermediate_value(model, data, out_folder, prefix_final)
         else:
             loader = data_loader(data, num_layers=2, num_neighbour_per_layer=-1, separate=False) # load all neighbours
-            inference_with_intermediate_value(model, loader, out_folder, "final")
+            inference_with_intermediate_value(model, loader, out_folder, prefix_final)
 
         batch_size = int(args.perbatch / 100 * data.num_edges) # perbatch is [x]%, so divide by 100
         print(f"Batch size for streaming graph: {batch_size}")
 
         # edge selection according to args.distribution
-        sample_edges, initial_edges = edge_remove(data.edge_index.numpy(), batch_size, args.distribution, data.is_directed())
+        sample_edges, initial_edges = edge_remove(data.edge_index.cpu().numpy(), batch_size, args.distribution, data.is_directed())
         initial_edges = torch.from_numpy(initial_edges).to(device) # from numpy to torch tensor
         sample_nodes = np.unique(sample_edges.reshape((-1,)))
 
         ## 2. calculate theorectially affected number of nodes
-        graph = EdgelistToGraph(np.transpose(data.edge_index.numpy()))
+        graph = EdgelistToGraph(np.transpose(data.edge_index.cpu().numpy()))
         fetched_vertex_affected_merged = Mergable(graph, sample_edges, nlayers=2, num_effected_end=2)
         theoretical_affected = {"input" : sample_nodes.size}
         theoretical_affected['conv1'] = fetched_vertex_affected_merged[0]  # affected next layer equals to fetched previous layer
@@ -89,19 +96,19 @@ def main():
         # data2 = dataset[0].__copy__().to(device)
         data2 = data  # the bulky data.x is not changed, directly change edge index on the same varaible. They are not used together.
         data2.edge_index = initial_edges  # todo: 不是很确定这里改变了edge_index后，会不会产生isolated node，进而影响后面的判断（by index)？
-
+        data2.edge_index.to(device)
         if not use_loader :
-            layer_names = inference_with_intermediate_value(model, data2, out_folder, "initial")
+            layer_names = inference_with_intermediate_value(model, data2, out_folder, prefix_initial)
         else:
             loader = data_loader(data2, num_layers=2, num_neighbour_per_layer=-1, separate=False) # select all
-            layer_names = inference_with_intermediate_value(model, loader, out_folder, "initial")
+            layer_names = inference_with_intermediate_value(model, loader, out_folder, prefix_initial)
 
         ## 4. load the two files\arrays and compare. calculate different rate at number level and node level. Different rate indicates the affected area (value changed)
         print(f"dataset: {args.dataset}    batch size: {batch_size}    aggregator: {args.aggr}    directed: {data.is_directed()}")
         print("\tdifferent numbers\ttotal numbers\tratio diff number\tdifferent nodes\ttheoretical affected node\ttotal nodes\tratio different node\tratio(real:theoretical)")
         for layer_name in layer_names:
-            final = np.load(osp.join(root, "dynamic", "examples", out_folder, f"final_{layer_name}.npy"))
-            initial = np.load(osp.join(root, "dynamic", "examples", out_folder, f"initial_{layer_name}.npy"))
+            final = np.load(osp.join(root, "dynamic", "examples", out_folder, prefix_final + f"_{layer_name}.npy"))
+            initial = np.load(osp.join(root, "dynamic", "examples", out_folder, prefix_initial + f"_{layer_name}.npy"))
             comparison = final == initial
             number_level_diff = np.sum(np.where(comparison == False, 1, 0))
             node_level_diff = np.sum(np.where(comparison.all(axis=1) == False, 1,0))

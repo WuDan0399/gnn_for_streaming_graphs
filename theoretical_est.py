@@ -32,6 +32,7 @@ def FirstLayer(degree, total_degree, num_effected_end, feature_length):
     return optimized_memory_access_per_add, expected_memory_access_per_change, total_memory_access
 
 
+@measure_time
 def EdgelistToGraph(edges):
     graph = {}
     for u, v in edges:
@@ -81,6 +82,7 @@ def NonOverlapped(graph, sample_edges, hidden_state_length, nlayers: int, num_ef
     return np.sum(fetched_vertices, axis=1)
 
 
+@measure_time
 def Mergable(graph, sample_edges:np.ndarray, nlayers: int, num_effected_end: int):
     ## Verified with nx.bfs_tree
     ## Sample verification code

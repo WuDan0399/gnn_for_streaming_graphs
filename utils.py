@@ -8,6 +8,8 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import torch
+from functools import wraps
+import time
 import torch_geometric as pyg
 from torch_geometric.datasets import Reddit, Planetoid, CitationFull, Yelp, AmazonProducts
 from torch_geometric.loader import NeighborLoader
@@ -18,6 +20,19 @@ torch.manual_seed(0)
 # root = os.getenv("DYNAMIC_GNN_ROOT")
 root = "/Users/wooden/PycharmProjects/GNNAccEst"
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+# decorator
+def measure_time(func):
+    @wraps(func)
+    def timeit_wrapper(*args, **kwargs) :
+        start_time = time.perf_counter()
+        result = func(*args, **kwargs)
+        end_time = time.perf_counter()
+        total_time = end_time - start_time
+        print(f'Function {func.__name__} {args} {kwargs} Took {total_time:.4f} seconds')
+        return result
+
+    return timeit_wrapper
 
 
 def save(model_state_dict, epoch, acc, name) -> None :
@@ -115,7 +130,7 @@ def print_data(data: pyg.data.Data) -> None :
 def general_parser(parser: argparse.ArgumentParser) -> argparse.Namespace :
     parser.add_argument("-d", '--dataset', type=str, default='amazon')
 
-    parser.add_argument('--hidden_channels', type=int, default=16)
+    parser.add_argument('--hidden_channels', type=int, default=256)
     parser.add_argument('--lr', type=float, default=0.01)
     parser.add_argument('--epochs', type=int, default=500)
     parser.add_argument('--aggr', type=str, default="min")
@@ -235,7 +250,7 @@ def edge_remove(full_edges: np.ndarray, batch_size:int, distribution: str, direc
 
 
 def is_large(data) :
-    return True if data.num_nodes > 5000 else False
+    return True if data.num_nodes > 500 else False
 
 
 def concate_by_id(full: np.ndarray, batch: np.ndarray, position: np.ndarray) -> np.ndarray :
