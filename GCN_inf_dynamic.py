@@ -62,7 +62,10 @@ def main():
             available_model.append(file)
 
     if len(available_model) == 0 :  # no available model, train from scratch
-        print(f"No available model. Please run `python GCN.py --dataset {args.dataset} --aggr {args.aggr}`")
+        if not is_large(data):
+            print(f"No available model. Please run `python GCN.py --dataset {args.dataset} --aggr {args.aggr}`")
+        else:
+            print(f"No available model. Please run `python GCN_neighbor_loader.py --dataset {args.dataset} --aggr {args.aggr}`")
 
     else :  # choose the model with the highest test acc
         accuracy = [float(re.findall("[0-1]\.[0-9]+", model_name)[0]) for model_name in available_model if

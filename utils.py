@@ -17,9 +17,23 @@ from torch_geometric.loader import NeighborLoader
 np.random.seed(0)
 torch.manual_seed(0)
 
-# root = os.getenv("DYNAMIC_GNN_ROOT")
-root = "/Users/wooden/PycharmProjects/GNNAccEst"
+root = os.getenv("DYNAMIC_GNN_ROOT")
+# root = "/Users/wooden/PycharmProjects/GNNAccEst"
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+def replace_arrays_with_shape_and_type(**kwargs):
+    """
+    For meature_time decorator, in case one of the argument is a tensor\array,
+    the measure_time function will print the content of the tensor\array, which is messy.
+    :param kwargs:  any function arguments that using measure_time decorator
+    :return:  a modified argument dict with tensor\arrays replaced with a descriptive string
+    """
+    for key, value in kwargs.items():
+        if isinstance(value, np.ndarray):
+            kwargs[key] = f"numpy.ndarray, shape: {value.shape}, dtype: {value.dtype}"
+        elif isinstance(value, torch.Tensor):
+            kwargs[key] = f"torch.Tensor, shape: {value.shape}, dtype: {value.dtype}"
+    return kwargs
 
 # decorator
 def measure_time(func):
@@ -29,7 +43,8 @@ def measure_time(func):
         result = func(*args, **kwargs)
         end_time = time.perf_counter()
         total_time = end_time - start_time
-        print(f'Function {func.__name__} {args} {kwargs} Took {total_time:.4f} seconds')
+        print(f'Function {func.__name__} {args} {replace_arrays_with_shape_and_type(**kwargs)} Took {total_time:.4f} seconds')
+
         return result
 
     return timeit_wrapper
@@ -128,7 +143,7 @@ def print_data(data: pyg.data.Data) -> None :
 
 
 def general_parser(parser: argparse.ArgumentParser) -> argparse.Namespace :
-    parser.add_argument("-d", '--dataset', type=str, default='amazon')
+    parser.add_argument("-d", '--dataset', type=str, default='yelp')
 
     parser.add_argument('--hidden_channels', type=int, default=256)
     parser.add_argument('--lr', type=float, default=0.01)
@@ -166,7 +181,7 @@ def load_dataset(args: argparse.Namespace) :
     elif args.dataset == "amazon" :  # class, but on-hot representation
         dataset = AmazonProducts(osp.join(root, "datasets", "Amazon"))
         # for data in dataset : # Actually only one data
-        #     data.y = data.y.type(torch.float64)
+        #     data.y = data.y.type(torch.float32)
         #     data.y = data.y.argmax(dim=-1)
     else:
         print("No such dataset. Available: Cora/cora/PubMed/reddit/yelp/amazon")

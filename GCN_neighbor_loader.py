@@ -42,7 +42,7 @@ def test(model, loader) :
     for batch in tqdm(loader) :
         batch = batch.to(device, 'edge_index')
         batch_size = batch.batch_size
-        out, _ = model(batch.x, batch.edge_index)[:batch_size]
+        out, _ = model(batch.x, batch.edge_index)
 
         if len(batch.y.shape) !=1:
             pred = (out > 1).float()
@@ -67,7 +67,7 @@ def main():
     print_dataset(dataset)
     data = dataset[0]
     add_mask(data)
-    data.y = data.y.type(torch.float64) # for amazon dataset, the y is int rather than float
+    # data.y = data.y.type(torch.float32) # for amazon dataset, the y is int rather than float
 
     print_data(data)
 
