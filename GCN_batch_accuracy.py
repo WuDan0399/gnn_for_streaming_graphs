@@ -1,3 +1,4 @@
+# NOTE: run with baselinePyG conda env!
 ##  GNN has inherent stablility, it is necessary to update for every interaction(edge) change.
 ##  Therefore, edges can be held and processed later in batch.
 ##  Larger batch allows the graph to be processed as a whole from the start.
@@ -18,7 +19,7 @@ def main():
     data = dataset[0]  # Only non-mem-costly edge_index changes, keep a copy of edge index and reuse the same variable
     full_edge_index = data.edge_index.detach()
 
-    use_loader = is_large(data)
+    use_loader = is_large(data) or args.use_loader
 
     model = myGCN.GCN(dataset.num_features, args.hidden_channels, dataset.num_classes, args).to(device)
 

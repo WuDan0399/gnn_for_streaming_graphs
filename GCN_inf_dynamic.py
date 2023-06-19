@@ -1,3 +1,4 @@
+# NOTE: run with baselinePyG conda env!
 from tqdm import tqdm
 
 from GCN import *
@@ -51,7 +52,7 @@ def main():
     data = dataset[0].to(device)
     # add_mask(data)  # inference doesnt need mask
     # print_data(data)
-    use_loader = is_large(data)
+    use_loader = is_large(data) or args.use_loader
 
     model = GCN(dataset.num_features, args.hidden_channels, dataset.num_classes, args).to(device)
 
@@ -62,7 +63,7 @@ def main():
             available_model.append(file)
 
     if len(available_model) == 0 :  # no available model, train from scratch
-        if not is_large(data):
+        if not is_large(data) and not args.use_loader:
             print(f"No available model. Please run `python GCN.py --dataset {args.dataset} --aggr {args.aggr}`")
         else:
             print(f"No available model. Please run `python GCN_neighbor_loader.py --dataset {args.dataset} --aggr {args.aggr}`")

@@ -1,3 +1,4 @@
+# NOTE: run with baselinePyG conda env!
 #################################################################################
 #  Original Code from:
 #  https://github.com/pyg-team/pytorch_geometric/blob/master/examples/gcn.py
@@ -19,15 +20,18 @@ class GCN(torch.nn.Module) :
         self.conv2 = GCNConv(hidden_channels, out_channels, cached=False,
                              normalize=not args.use_gdc, aggr=args.aggr)
 
-    def forward(self, x, edge_index, edge_weight=None) :
+    def forward(self, x, edge_index, edge_weight=None):
         out_per_layer = {}
-        out_per_layer["input"] = x.detach()
+        if not speed:
+            out_per_layer["input"] = x.detach()
         x = F.dropout(x, p=0.5, training=self.training)  # prevent overfitting, cannot sparsify the input\network for inference
         x = self.conv1(x, edge_index, edge_weight).relu()
-        out_per_layer["conv1"] = x.detach()
+        if not speed :
+            out_per_layer["conv1"] = x.detach()
         x = F.dropout(x, p=0.5, training=self.training)
         x = self.conv2(x, edge_index, edge_weight)
-        out_per_layer["conv2"] = x.detach()
+        if not speed :
+            out_per_layer["conv2"] = x.detach()
         return x, out_per_layer
 
 

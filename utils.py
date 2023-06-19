@@ -3,6 +3,7 @@ import os
 import os.path as osp
 import re
 from typing import Tuple, Union
+import multiprocessing
 
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -13,6 +14,8 @@ import time
 import torch_geometric as pyg
 from torch_geometric.datasets import Reddit, Planetoid, CitationFull, Yelp, AmazonProducts
 from torch_geometric.loader import NeighborLoader
+from torch_geometric.typing import EdgeType, InputNodes, OptTensor
+
 
 np.random.seed(0)
 torch.manual_seed(0)
@@ -20,6 +23,8 @@ torch.manual_seed(0)
 root = os.getenv("DYNAMIC_GNN_ROOT")
 # root = "/Users/wooden/PycharmProjects/GNNAccEst"
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+speed = True   # skip unnecessary operations for speed test
 
 def replace_arrays_with_shape_and_type(**kwargs):
     """
@@ -103,9 +108,16 @@ def add_mask(data: pyg.data.Data) -> None :
                                               test_ratio else False for x in rand_choice], dtype=torch.bool)
 
 
-
-def data_loader(data, num_layers:int = 2, num_neighbour_per_layer:int = -1, separate: bool = True) :
-    kwargs = {'batch_size': 1, 'num_workers': 1, 'persistent_workers' : True}
+def data_loader(data, input_nodes:OptTensor = None,
+                num_layers:int = 2,
+                num_neighbour_per_layer:int = -1,
+                separate: bool = True,
+                persistent_workers: bool = True) :
+    if multiprocessing.cpu_count() <10:
+        kwargs = {'batch_size': 4, 'num_workers': 2, 'persistent_workers': persistent_workers}
+    else:
+        kwargs = {'batch_size': 16, 'num_workers': 4, 'persistent_workers': persistent_workers}
+    # print(kwargs)
     if separate :
         train_loader = NeighborLoader(data, num_neighbors=[num_neighbour_per_layer] * num_layers, shuffle=True,
                                       input_nodes=data.train_mask, **kwargs)
@@ -115,7 +127,7 @@ def data_loader(data, num_layers:int = 2, num_neighbour_per_layer:int = -1, sepa
                                      input_nodes=data.test_mask, **kwargs)
         return train_loader, val_loader, test_loader
     else :
-        return NeighborLoader(data, num_neighbors=[num_neighbour_per_layer] * num_layers,
+        return NeighborLoader(data, input_nodes= input_nodes, num_neighbors=[num_neighbour_per_layer] * num_layers,
                               **kwargs)  # by default use all nodes as input_nodes
 
 
@@ -162,6 +174,8 @@ def general_parser(parser: argparse.ArgumentParser) -> argparse.Namespace :
                         help="percentage of edges loaded per batch. [0.0, 100.0]")
     parser.add_argument("-nb", "--numbatch",
                         default=50, type=int, help="number of batches")
+    parser.add_argument("--range", default="full", type=str, help="range of inference [full/affected/mono]")
+    parser.add_argument("--use_loader", action='store_true', help="whether to use data loader")
     args = parser.parse_args()
     return args
 
@@ -265,7 +279,7 @@ def edge_remove(full_edges: np.ndarray, batch_size:int, distribution: str, direc
 
 
 def is_large(data) :
-    return True if data.num_nodes > 500 else False
+    return True if data.num_nodes > 50000 else False
 
 
 def concate_by_id(full: np.ndarray, batch: np.ndarray, position: np.ndarray) -> np.ndarray :
@@ -285,3 +299,22 @@ def concate_by_id(full: np.ndarray, batch: np.ndarray, position: np.ndarray) -> 
         full[position] = batch
 
     return full
+
+def create_directory(path):  # by chatgpt
+    try:
+        os.makedirs(path)
+        print(f"Directory '{path}' created successfully.")
+    except FileExistsError:
+        print(f"Directory '{path}' already exists.")
+
+def to_dict(edges: torch.Tensor):
+    edge_dict = {}
+    for i in range(edges.size(1)) :
+        source_node = edges[0, i].item()
+        dest_node = edges[1, i].item()
+
+        if source_node not in edge_dict :
+            edge_dict[source_node] = []
+
+        edge_dict[source_node].append(dest_node)
+    return edge_dict

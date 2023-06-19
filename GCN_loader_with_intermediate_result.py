@@ -1,4 +1,3 @@
-# NOTE: run with baselinePyG conda env!
 #################################################################################
 #  Original Code from:
 #  https://github.com/pyg-team/pytorch_geometric/blob/master/examples/gcn.py
