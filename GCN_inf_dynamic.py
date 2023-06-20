@@ -7,7 +7,7 @@ from theoretical_est import EdgelistToGraph, Mergable
 
 @measure_time
 @torch.no_grad()
-def inference_with_intermediate_value(model, data:Union[pyg.data.Data, pyg.loader.NeighborLoader], folder:str, prefix:str) :
+def inference_with_intermediate_value(model, data: Union[pyg.data.Data, pyg.loader.NeighborLoader], folder:str, prefix:str) :
     # Could be pyg.Data or NeighbourLoader
     model.eval()
     if isinstance(data, pyg.data.Data):
@@ -21,7 +21,7 @@ def inference_with_intermediate_value(model, data:Union[pyg.data.Data, pyg.loade
         for batch in tqdm(data):
             batch = batch.to(device, 'edge_index')
             batch_size = batch.batch_size
-            _, batch_result_each_layer = model(batch.x, batch.edge_index)  # 虽然不是很懂，但是copy-paste来的是这样的
+            _, batch_result_each_layer, _ = model(batch.x, batch.edge_index)  # 虽然不是很懂，但是copy-paste来的是这样的
             for layer in batch_result_each_layer:
                 if layer not in result_each_layer:
                     result_each_layer[layer] = np.array([])
@@ -86,7 +86,7 @@ def main():
 
         # edge selection according to args.distribution
         sample_edges, initial_edges = edge_remove(data.edge_index.cpu().numpy(), batch_size, args.distribution, data.is_directed())
-        initial_edges = torch.from_numpy(initial_edges).to(device) # from numpy to torch tensor
+        initial_edges = torch.from_numpy(initial_edges).to(device)  # from numpy to torch tensor
         sample_nodes = np.unique(sample_edges.reshape((-1,)))
 
         ## 2. calculate theorectially affected number of nodes

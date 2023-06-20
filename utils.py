@@ -24,8 +24,6 @@ root = os.getenv("DYNAMIC_GNN_ROOT")
 # root = "/Users/wooden/PycharmProjects/GNNAccEst"
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-speed = True   # skip unnecessary operations for speed test
-
 def replace_arrays_with_shape_and_type(**kwargs):
     """
     For meature_time decorator, in case one of the argument is a tensor\array,
@@ -176,6 +174,7 @@ def general_parser(parser: argparse.ArgumentParser) -> argparse.Namespace :
                         default=50, type=int, help="number of batches")
     parser.add_argument("--range", default="full", type=str, help="range of inference [full/affected/mono]")
     parser.add_argument("--use_loader", action='store_true', help="whether to use data loader")
+    parser.add_argument("--save_int", action='store_true', help="whether to save intermediate result during inference")
     args = parser.parse_args()
     return args
 

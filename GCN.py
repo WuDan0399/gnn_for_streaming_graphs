@@ -15,30 +15,41 @@ from utils import *
 class GCN(torch.nn.Module) :
     def __init__(self, in_channels, hidden_channels, out_channels, args) :
         super().__init__()
+        self.save_int = args.save_int
         self.conv1 = GCNConv(in_channels, hidden_channels, cached=False,
-                             normalize=not args.use_gdc, aggr=args.aggr)
+                             normalize=not args.use_gdc, aggr=args.aggr, save_intermediate=args.save_int)
         self.conv2 = GCNConv(hidden_channels, out_channels, cached=False,
-                             normalize=not args.use_gdc, aggr=args.aggr)
+                             normalize=not args.use_gdc, aggr=args.aggr, save_intermediate=args.save_int)
 
     def forward(self, x, edge_index, edge_weight=None):
         out_per_layer = {}
-        if not speed:
+        intermediate_result_per_layer = {}
+
+        if self.save_int:
             out_per_layer["input"] = x.detach()
-        x = F.dropout(x, p=0.5, training=self.training)  # prevent overfitting, cannot sparsify the input\network for inference
-        x = self.conv1(x, edge_index, edge_weight).relu()
-        if not speed :
+
+        x = F.dropout(x, p=0.5, training=self.training)   # prevent overfitting, cannot sparsify the input\network for inference
+        x, intermediate_result = self.conv1(x, edge_index, edge_weight)
+        x = x.relu()
+        if self.save_int :
+            intermediate_result_per_layer["layer1"] = intermediate_result
             out_per_layer["conv1"] = x.detach()
+
         x = F.dropout(x, p=0.5, training=self.training)
-        x = self.conv2(x, edge_index, edge_weight)
-        if not speed :
+        x, intermediate_result = self.conv2(x, edge_index, edge_weight)
+
+        if self.save_int:
+            intermediate_result_per_layer["layer2"] = intermediate_result
             out_per_layer["conv2"] = x.detach()
-        return x, out_per_layer
+
+        return x, out_per_layer, intermediate_result_per_layer
 
 
 def train(model, data, optimizer) :
     model.train()
     optimizer.zero_grad()
-    out, _ = model(data.x, data.edge_index, data.edge_attr)
+    result = model(data.x, data.edge_index, data.edge_attr)
+    out = result[0]
     loss = F.cross_entropy(out[data.train_mask], data.y[data.train_mask])
     loss.backward()
     optimizer.step()
@@ -48,7 +59,8 @@ def train(model, data, optimizer) :
 @torch.no_grad()
 def test(model, data) :
     model.eval()
-    out, _ = model(data.x, data.edge_index, data.edge_attr)
+    result = model(data.x, data.edge_index, data.edge_attr)
+    out = result[0]
     pred = out.argmax(dim=-1)
 
     accs = []
@@ -59,7 +71,8 @@ def test(model, data) :
 @torch.no_grad()
 def test_all(model, data) :
     model.eval()
-    out, _ = model(data.x, data.edge_index, data.edge_attr)
+    result = model(data.x, data.edge_index, data.edge_attr)
+    out = result[0]
     pred = out.argmax(dim=-1)
     return int((pred == data.y).sum()) / len(pred)
 

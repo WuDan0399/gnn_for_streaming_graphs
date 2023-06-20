@@ -6,3 +6,5 @@ obsolete
 theoretical_result
 
 *.log
+*.xml
+*.iml

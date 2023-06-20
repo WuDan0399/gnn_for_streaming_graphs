@@ -78,7 +78,6 @@ def main():
     parser = argparse.ArgumentParser()
     args = general_parser(parser)
     dataset = load_dataset(args)
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     print_dataset(dataset)
     data = dataset[0].to(device)
