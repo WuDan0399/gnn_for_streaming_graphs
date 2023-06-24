@@ -17,9 +17,9 @@ class GCN(torch.nn.Module) :
         super().__init__()
         self.save_int = args.save_int
         self.conv1 = GCNConv(in_channels, hidden_channels, cached=False,
-                             normalize=not args.use_gdc, aggr=args.aggr, save_intermediate=args.save_int)
+                             normalize=False, aggr=args.aggr, save_intermediate=args.save_int)
         self.conv2 = GCNConv(hidden_channels, out_channels, cached=False,
-                             normalize=not args.use_gdc, aggr=args.aggr, save_intermediate=args.save_int)
+                             normalize=False, aggr=args.aggr, save_intermediate=args.save_int)
 
     def forward(self, x, edge_index, edge_weight=None):
         out_per_layer = {}

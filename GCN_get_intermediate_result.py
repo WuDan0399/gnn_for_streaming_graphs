@@ -7,11 +7,6 @@
 #################################################################################
 import random
 
-import torch.nn.functional as F
-import torch_geometric.transforms as T
-
-from torch_geometric.logging import init_wandb, log
-
 from tqdm import tqdm
 from utils import *
 from GCN import GCN
@@ -42,7 +37,7 @@ def test(model, loader, folder:str, postfix: str) :
                                                                                 "a-"][:batch_size].cpu()
             if len(intermediate_result_each_layer[layer]['a']) != 0:
                 intermediate_result_each_layer[layer]['a'] = torch.concat((intermediate_result_each_layer[layer]["a"],
-                                                     batch_intermediate_result_per_layer[layer]["a-"][:batch_size].cpu()))
+                                                     batch_intermediate_result_per_layer[layer]["a"][:batch_size].cpu()))
             else:
                 intermediate_result_each_layer[layer]['a'] = batch_intermediate_result_per_layer[layer][
                                                                                 "a"][:batch_size].cpu()
@@ -57,7 +52,8 @@ def test(model, loader, folder:str, postfix: str) :
 
 def main():
     parser = argparse.ArgumentParser()
-    args = general_parser(parser)
+    # args = general_parser(parser)
+    args = FakeArgs()
     dataset = load_dataset(args)
 
     out_folder = osp.join("examples", "intermediate", args.dataset, args.aggr)
@@ -92,10 +88,14 @@ def main():
         print(f"Batch size for streaming graph: {batch_size}")
 
         # edge selection according to args.distribution
-        sample_edges, initial_edges = edge_remove(data.edge_index.cpu().numpy(), batch_size, args.distribution,
-                                                  data.is_directed())
-        initial_edges = torch.from_numpy(initial_edges).to(device)  # from numpy to torch tensor
+        # sample_edges, initial_edges = edge_remove(data.edge_index.cpu().numpy(), batch_size, args.distribution,
+        #                                           data.is_directed())
+        # initial_edges = torch.from_numpy(initial_edges).to(device)  # from numpy to torch tensor
         # sample_nodes = np.unique(sample_edges.reshape((-1,)))
+
+        edge_index = data.edge_index.cpu()
+        sample_edges = torch.reshape(edge_index[:, 2569:2570], (1,2))  # directly remove the first column
+        initial_edges = torch.concat((edge_index[:, :2569], edge_index[:, 2570:]), dim=1)
 
         ## run inference for the initial graph (before edge adding).
         data2 = data  # the bulky data.x is not changed, directly change edge index on the same varaible. They are not used together.
@@ -106,7 +106,7 @@ def main():
         if len(sample_edges)==1:
             post_fix = f"_({sample_edges[0,0]}, {sample_edges[0,1]})"
         else:
-            post_fix = str(random.randint(0, 99))
+            post_fix = "_" + str(random.randint(0, 99))
             np.save(osp.join(out_folder, post_fix+".npy"), sample_edges)
 
         _ = test(model, loader, out_folder, post_fix)  # full graph result

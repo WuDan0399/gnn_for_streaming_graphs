@@ -8,3 +8,4 @@ theoretical_result
 *.log
 *.xml
 *.iml
+verification_aggregation.ipynb

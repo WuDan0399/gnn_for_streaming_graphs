@@ -4,6 +4,8 @@ import os.path as osp
 import re
 from typing import Tuple, Union
 import multiprocessing
+from itertools import groupby
+from operator import attrgetter
 
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -20,9 +22,46 @@ from torch_geometric.typing import EdgeType, InputNodes, OptTensor
 np.random.seed(0)
 torch.manual_seed(0)
 
-root = os.getenv("DYNAMIC_GNN_ROOT")
-# root = "/Users/wooden/PycharmProjects/GNNAccEst"
+# root = os.getenv("DYNAMIC_GNN_ROOT")
+root = "/Users/wooden/PycharmProjects/GNNAccEst"
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
+class Task:
+    def __init__(self, op, src, dst, msg):
+        self.op = op
+        self.src = src
+        self.dst = dst
+        self.msg = msg
+
+
+class FakeArgs:
+    dataset = 'Cora'
+    use_gdc = False
+    aggr = 'min'
+    save_int = True
+    hidden_channels = 256
+    perbatch = 1
+
+def group_task_queue(task_q: list) -> dict:
+    # groupby returns consecutive keys, so need to sort first
+    result = {}
+    task_q_sorted = sorted(task_q, key=attrgetter('dst', 'op')) # sorting by 'dst' first, then by 'op'
+    for dst, tasks_in_dst in groupby(task_q_sorted, key=attrgetter('dst')):
+        result[dst] = {op: [(task.src, task.msg) for task in tasks] for op, tasks in groupby(tasks_in_dst, key=attrgetter('op'))}
+    return result
+
+def print_task_queue(task_q):
+    for task in task_q:
+        print(f"<{task.op}, {task.src}, {task.dst}, {task.msg.shape}>")
+
+def replace_matches_with_inf(tensor1, tensor2):  #TODO: change to aggregator-depdent -> inf for min, -inf for max
+    assert tensor1.shape == tensor2.shape, "Both tensors must have the same shape"
+
+    mask = tensor1 == tensor2
+    tensor1[mask] = float('inf')
+
+    return tensor1, mask
 
 def replace_arrays_with_shape_and_type(**kwargs):
     """
@@ -112,7 +151,7 @@ def data_loader(data, input_nodes:OptTensor = None,
                 separate: bool = True,
                 persistent_workers: bool = True) :
     if multiprocessing.cpu_count() <10:
-        kwargs = {'batch_size': 4, 'num_workers': 2, 'persistent_workers': persistent_workers}
+        kwargs = {'batch_size': 8, 'num_workers': 1, 'persistent_workers': persistent_workers}
     else:
         kwargs = {'batch_size': 16, 'num_workers': 4, 'persistent_workers': persistent_workers}
     # print(kwargs)
