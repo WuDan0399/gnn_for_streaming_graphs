@@ -1,7 +1,0 @@
-dynamic==0.1.1
-matplotlib==3.6.2
-networkx==2.8.4
-numpy==1.23.5
-torch==1.13.1
-torch_geometric==2.2.0
-tqdm==4.65.0

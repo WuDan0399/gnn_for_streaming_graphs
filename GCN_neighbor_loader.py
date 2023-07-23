@@ -22,9 +22,9 @@ def train(model, train_loader, optimizer) :
     total_examples = total_loss = 0
     for batch in tqdm(train_loader) :
         optimizer.zero_grad()
-        batch = batch.to(device, 'edge_index')
+        batch = batch.to(device, 'x', 'edge_index')
         batch_size = batch.batch_size
-        out, _ = model(batch.x, batch.edge_index)
+        out, _, _ = model(batch.x, batch.edge_index)
         loss = F.cross_entropy(out[:batch_size], batch.y[:batch_size])
         loss.backward()
         optimizer.step()
@@ -38,12 +38,22 @@ def train(model, train_loader, optimizer) :
 @torch.no_grad()
 def test(model, loader) :
     model.eval()
-
     total_examples = total_correct = 0
+
+    t_loader, t_aggr, t_comb = 0,0,0
+    sync(device)
+    start_data_load = time.perf_counter()
+
     for batch in tqdm(loader) :
-        batch = batch.to(device, 'edge_index')
+        batch = batch.to(device, 'x', 'edge_index')
         batch_size = batch.batch_size
-        out, _ = model(batch.x, batch.edge_index)
+        sync(device)
+        end_data_load = time.perf_counter()
+        t_loader = t_loader + (end_data_load - start_data_load)
+
+        out, _, inter_and_time = model(batch.x, batch.edge_index)
+        t_comb = t_comb + inter_and_time["layer1"]["t_comb"] + inter_and_time["layer2"]["t_comb"]
+        t_aggr = t_aggr + inter_and_time["layer1"]["t_aggr"] + inter_and_time["layer2"]["t_aggr"]
 
         if len(batch.y.shape) !=1:
             pred = (out > 1).float()
@@ -54,6 +64,10 @@ def test(model, loader) :
             total_correct += int((pred[:batch_size] == batch.y[:batch_size]).sum())
             total_examples += batch_size
 
+        sync(device)
+        start_data_load = time.perf_counter()
+    print(f"[Time] Sampling (s)\tAggregation (s)\tCombination(s)")
+    print(f"{t_loader}\t{t_aggr}\t{t_comb}")
     return total_correct / total_examples
 
 
@@ -68,7 +82,6 @@ def main():
     print_dataset(dataset)
     data = dataset[0]
     add_mask(data)
-    # data.y = data.y.type(torch.float32) # for amazon dataset, the y is int rather than float
 
     print_data(data)
 
@@ -121,11 +134,19 @@ def main():
         save(best_model_state_dict, epoch, best_test_acc, name_prefix)
 
     else :  # choose the model with the highest test acc
+        print("Inference with full graph as input.")
+        if args.interval > 0:
+            timing_sampler(data, args)  # get the latest 'interval' edges for inference.
+            print(data.num_edges)
+        else:
+            print("Disable edge sampling according to creation time.")
+
+        loader = data_loader(data, num_layers=2, num_neighbour_per_layer=-1, separate=False)  # load all neighbours
         accuracy = [float(re.findall("[0-1]\.[0-9]+", model_name)[0]) for model_name in available_model if
                     len(re.findall("[0-1]\.[0-9]+", model_name)) != 0]
         index_best_model = np.argmax(accuracy)
-        model = load(model, available_model[index_best_model])
-        test_acc = test(model, test_loader)
+        model = load(model, available_model[index_best_model]).to(device)
+        test_acc = test(model, loader)
         print(f'Test: {test_acc:.4f}')
 
         available_model.pop(index_best_model)

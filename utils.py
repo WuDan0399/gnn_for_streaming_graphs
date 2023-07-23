@@ -1,91 +1,107 @@
 import argparse
+import multiprocessing
 import os
 import os.path as osp
 import re
-from typing import Tuple, Union
-import multiprocessing
+import time
+from functools import wraps
 from itertools import groupby
 from operator import attrgetter
+from collections import defaultdict
+from typing import Tuple, Union, List, Dict
 
-import matplotlib.pyplot as plt
-import networkx as nx
 import numpy as np
 import torch
-from functools import wraps
-import time
 import torch_geometric as pyg
 from torch_geometric.datasets import Reddit, Planetoid, CitationFull, Yelp, AmazonProducts
 from torch_geometric.loader import NeighborLoader
-from torch_geometric.typing import EdgeType, InputNodes, OptTensor
-
+from torch_geometric.typing import OptTensor
 
 np.random.seed(0)
 torch.manual_seed(0)
+torch.set_printoptions(precision=10)
 
 # root = os.getenv("DYNAMIC_GNN_ROOT")
-root = "/Users/wooden/PycharmProjects/GNNAccEst"
+root = "/Users/wooden/PycharmProjects/GNNAccEst/"
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+class bcolors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKCYAN = '\033[96m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
 
-class Task:
-    def __init__(self, op, src, dst, msg):
+
+class Task :
+    def __init__(self, op, src, dst, msg) :
         self.op = op
         self.src = src
         self.dst = dst
         self.msg = msg
 
 
-class FakeArgs:
-    dataset = 'Cora'
-    use_gdc = False
-    aggr = 'min'
-    save_int = True
-    hidden_channels = 256
-    perbatch = 1
+class FakeArgs :
+    def __init__(self, dataset='Cora', use_gdc=False, aggr='min', save_int=True, hidden_channels=256, perbatch=1, stream='add', interval:int=50000) :
+        self.dataset = dataset
+        self.use_gdc = use_gdc
+        self.aggr = aggr
+        self.save_int = save_int
+        self.hidden_channels = hidden_channels
+        self.perbatch = perbatch
+        self.stream = stream
+        self.interval = interval
 
-def group_task_queue(task_q: list) -> dict:
+
+def group_task_queue(task_q: list) -> dict :
     # groupby returns consecutive keys, so need to sort first
     result = {}
-    task_q_sorted = sorted(task_q, key=attrgetter('dst', 'op')) # sorting by 'dst' first, then by 'op'
-    for dst, tasks_in_dst in groupby(task_q_sorted, key=attrgetter('dst')):
-        result[dst] = {op: [(task.src, task.msg) for task in tasks] for op, tasks in groupby(tasks_in_dst, key=attrgetter('op'))}
+    task_q_sorted = sorted(task_q, key=attrgetter('dst', 'op'))  # sorting by 'dst' first, then by 'op'
+    for dst, tasks_in_dst in groupby(task_q_sorted, key=attrgetter('dst')) :
+        result[dst] = {op : [(task.src, task.msg) for task in tasks] for op, tasks in
+                       groupby(tasks_in_dst, key=attrgetter('op'))}
     return result
 
-def print_task_queue(task_q):
-    for task in task_q:
+
+def print_task_queue(task_q) :
+    for task in task_q :
         print(f"<{task.op}, {task.src}, {task.dst}, {task.msg.shape}>")
 
-def replace_matches_with_inf(tensor1, tensor2):  #TODO: change to aggregator-depdent -> inf for min, -inf for max
-    assert tensor1.shape == tensor2.shape, "Both tensors must have the same shape"
 
-    mask = tensor1 == tensor2
-    tensor1[mask] = float('inf')
-
-    return tensor1, mask
-
-def replace_arrays_with_shape_and_type(**kwargs):
+def replace_arrays_with_shape_and_type(**kwargs) :
     """
     For meature_time decorator, in case one of the argument is a tensor\array,
     the measure_time function will print the content of the tensor\array, which is messy.
     :param kwargs:  any function arguments that using measure_time decorator
     :return:  a modified argument dict with tensor\arrays replaced with a descriptive string
     """
-    for key, value in kwargs.items():
-        if isinstance(value, np.ndarray):
+    for key, value in kwargs.items() :
+        if isinstance(value, np.ndarray) :
             kwargs[key] = f"numpy.ndarray, shape: {value.shape}, dtype: {value.dtype}"
-        elif isinstance(value, torch.Tensor):
+        elif isinstance(value, torch.Tensor) :
             kwargs[key] = f"torch.Tensor, shape: {value.shape}, dtype: {value.dtype}"
     return kwargs
 
+
+def sync(device) :
+    if device == 'cuda' :
+        torch.cuda.synchronize()  # wait for warm-up to finish
+
+
 # decorator
-def measure_time(func):
+def measure_time(func) :
     @wraps(func)
     def timeit_wrapper(*args, **kwargs) :
         start_time = time.perf_counter()
         result = func(*args, **kwargs)
         end_time = time.perf_counter()
         total_time = end_time - start_time
-        print(f'Function {func.__name__} {args} {replace_arrays_with_shape_and_type(**kwargs)} Took {total_time:.4f} seconds')
+        print(
+            f'Function {func.__name__} {args} {replace_arrays_with_shape_and_type(**kwargs)} Took {total_time:.4f} seconds')
 
         return result
 
@@ -112,24 +128,22 @@ def clean(files: list) -> None :
             os.remove(osp.join(root, "dynamic", "examples", "trained_model", file))
 
 
-# Visualization function for NX graph or PyTorch tensor
-def visualize(h, color, epoch=None, loss=None, accuracy=None) -> None :
-    plt.figure(figsize=(7, 7))
-    plt.xticks([])
-    plt.yticks([])
+def load_tensors_to_dict(root: str, skip: int = 5, postfix: str = "_initial.pt") :
+    result = {}
+    for path, dirs, files in os.walk(root) :
+        if files :  # check if there are any files in the current directory
+            path_parts = path.split(os.sep)  # get parts of the path
+            sub_dict = result
+            for part in path_parts[skip :] :  # skip unnecessary directory
+                if part not in sub_dict :
+                    sub_dict[part] = {}
+                sub_dict = sub_dict[part]
+            for file in files :
+                if file.endswith(postfix) :  # check if the file is a .pt file and the correpsonding postfix
+                    name_parts = file[:-3].split('_')  # we remove the extension and split the filename
+                    sub_dict[name_parts[0]] = torch.load(os.path.join(path, file))
+    return result
 
-    if torch.is_tensor(h) :
-        h = h.detach().cpu().numpy()
-        plt.scatter(h[:, 0], h[:, 1], s=140, c=color, cmap="Set2")
-        if epoch is not None and loss is not None and accuracy['train'] is not None and accuracy['val'] is not None :
-            plt.xlabel((f'Epoch: {epoch}, Loss: {loss.item():.4f} \n'
-                        f'Training Accuracy: {accuracy["train"] * 100:.2f}% \n'
-                        f' Validation Accuracy: {accuracy["val"] * 100:.2f}%'),
-                       fontsize=16)
-    else :
-        nx.draw_networkx(h, pos=nx.spring_layout(h, seed=42), with_labels=False,
-                         node_color=color, cmap="Set2")
-    plt.show()
 
 
 def add_mask(data: pyg.data.Data) -> None :
@@ -145,15 +159,17 @@ def add_mask(data: pyg.data.Data) -> None :
                                               test_ratio else False for x in rand_choice], dtype=torch.bool)
 
 
-def data_loader(data, input_nodes:OptTensor = None,
-                num_layers:int = 2,
-                num_neighbour_per_layer:int = -1,
+def data_loader(data, input_nodes = None,
+                num_layers: int = 2,
+                num_neighbour_per_layer: int = -1,
                 separate: bool = True,
-                persistent_workers: bool = True) :
-    if multiprocessing.cpu_count() <10:
-        kwargs = {'batch_size': 8, 'num_workers': 1, 'persistent_workers': persistent_workers}
-    else:
-        kwargs = {'batch_size': 16, 'num_workers': 4, 'persistent_workers': persistent_workers}
+                persistent_workers: bool = True, disjoint=False) :
+    if multiprocessing.cpu_count() < 10 :
+        kwargs = {'batch_size' : 8, 'num_workers' : 1, 'persistent_workers' : persistent_workers}
+    else :
+        kwargs = {'batch_size' : 16, 'num_workers' : 4, 'persistent_workers' : persistent_workers}
+    if disjoint == True:
+        kwargs['batch_size'] = 1
     # print(kwargs)
     if separate :
         train_loader = NeighborLoader(data, num_neighbors=[num_neighbour_per_layer] * num_layers, shuffle=True,
@@ -164,7 +180,7 @@ def data_loader(data, input_nodes:OptTensor = None,
                                      input_nodes=data.test_mask, **kwargs)
         return train_loader, val_loader, test_loader
     else :
-        return NeighborLoader(data, input_nodes= input_nodes, num_neighbors=[num_neighbour_per_layer] * num_layers,
+        return NeighborLoader(data, input_nodes=input_nodes, num_neighbors=[num_neighbour_per_layer] * num_layers,
                               **kwargs)  # by default use all nodes as input_nodes
 
 
@@ -207,57 +223,119 @@ def general_parser(parser: argparse.ArgumentParser) -> argparse.Namespace :
                         type=int, help="number of layers")
     parser.add_argument("-i", "--initial", default=70.0, type=float,
                         help="percentage of edges loaded at the begining. [0.0, 100.0]")
-    parser.add_argument("-pb", "--perbatch", default=0.1, type=float,
+    parser.add_argument("-pb", "--perbatch", default=1, type=float,
                         help="percentage of edges loaded per batch. [0.0, 100.0]")
+    parser.add_argument("--interval", default=500000, type=float,
+                        help="percentage of the latest proportion/number of edges for inference. [0.0, 1.0] or int. Default: 500k edges")
     parser.add_argument("-nb", "--numbatch",
                         default=50, type=int, help="number of batches")
     parser.add_argument("--range", default="full", type=str, help="range of inference [full/affected/mono]")
     parser.add_argument("--use_loader", action='store_true', help="whether to use data loader")
-    parser.add_argument("--save_int", action='store_true', help="whether to save intermediate result during inference")
+    parser.add_argument("--save_int", action='store_true',
+                        help="whether to save intermediate timing_result during inference")
+    parser.add_argument("--stream", default="mix", type=str,
+                        help="how edges changes, insertion or deletion or both [add/delete/mix]")
+    parser.add_argument("--it", default=0, type=int,
+                        help="used to iterate large dataset. 100 datapoints each iteration.")
     args = parser.parse_args()
     return args
+
+
+def timing_sampler(data: pyg.data.Data, args) :
+    # todo: check wther runable on GPU -> do complex operation, should i offload then upload to cuda?
+    """
+    Simulate the streaming graphs. Generate random time information, get the lastest 'interval' edges of data for gnn.
+    :param data: PyG.data
+    :param args: command arguments
+    :param interval: float or int. in (0,1) -> ratio. >1 -> exact size of num_edges
+    :return: the lastest 'interval' edges for data.
+    """
+    print(f"Sampling {args.interval} edges for {args.dataset}")
+    folder_path = os.path.join("examples", "creation_time")
+    create_directory(folder_path)
+
+    if args.interval > 1 :
+        # (opt1) roughly interval edges
+        interval = args.interval / data.num_edges
+        threshold = 1 - interval
+        # (opt2) Exact interval edges, but time-consuming
+        # threshold = torch.min(mask.topk(interval).values)
+    else :
+        interval = args.interval
+        threshold = 1 - args.interval
+
+    file_path = os.path.join("examples", "creation_time", f"{args.dataset}_{interval}_{threshold}.pt")
+
+    if os.path.exists(file_path) :
+        mask = torch.load(file_path)
+    else :
+        print(f"Generate random time information for dataset {args.dataset}")
+        mask = torch.rand(data.edge_index.shape[1])
+        torch.save(mask, file_path)
+
+    # Filter data.edge_index based on the mask
+    filtered_edge_index = data.edge_index[:, mask > threshold]
+    data.edge_index = filtered_edge_index
+    return
 
 
 def load_dataset(args: argparse.Namespace) :
     if args.dataset == "Cora" :  # class
         # 2,708,  10,556,  1,433 , 7
-        dataset = Planetoid(osp.join(root, "datasets", "Planetoid"), "Cora")
+        dataset = Planetoid(osp.join(root, "datasets", "node_classification", "Planetoid"), "Cora")
     elif args.dataset == "PubMed" :  # class
-        dataset = Planetoid(osp.join(root, "datasets", "Planetoid"), "PubMed")
+        dataset = Planetoid(osp.join(root, "datasets","node_classification", "Planetoid"), "PubMed")
     elif args.dataset == 'reddit' :  # class
-        dataset = Reddit(osp.join(root, "datasets", "Reddit"))
+        dataset = Reddit(osp.join(root, "datasets", "node_classification", "Reddit"))
     elif args.dataset == "cora" :  # class
-        dataset = CitationFull(osp.join(root, "datasets", "CitationFull"), "Cora")
+        dataset = CitationFull(osp.join(root, "datasets", "node_classification", "CitationFull"), "Cora")
     elif args.dataset == "yelp" :  # tasks Non one-hot
-        dataset = Yelp(osp.join(root, "datasets", "Yelp"))
-    elif args.dataset == "amazon" :  # class, but on-hot representation
-        dataset = AmazonProducts(osp.join(root, "datasets", "Amazon"))
+        dataset = Yelp(osp.join(root, "datasets", "node_classification", "Yelp"))
+    # elif args.dataset == "amazon" :  # class, but on-hot representation
+    #     dataset = AmazonProducts(osp.join(root, "datasets", "node_classification", "Amazon"))
         # for data in dataset : # Actually only one data
         #     data.y = data.y.type(torch.float32)
         #     data.y = data.y.argmax(dim=-1)
-    else:
+    else :
         print("No such dataset. Available: Cora/cora/PubMed/reddit/yelp/amazon")
     return dataset
 
 
-def load_available_model(args: argparse.Namespace) :
+def load_available_model(model, args: argparse.Namespace) :
     available_model = []
-    name_prefix = f"{args.dataset}_GCN_{args.aggr}_0.5dropout"
+    name_prefix = f"{args.dataset}_GCN_{args.aggr}"
     for file in os.listdir("examples/trained_model") :
         if re.match(name_prefix + "_[0-9]+_[0-1]\.[0-9]+\.pt", file) :
             available_model.append(file)
+    if len(available_model) == 0 :  # no available model, train from scratch
+        print(
+            f"No available model. Please run `python GCN_neighbor_loader.py --dataset {args.dataset} --aggr {args.aggr}`")
+        return None
+
+    # choose the model with the highest test acc
+    accuracy = [float(re.findall("[0-1]\.[0-9]+", model_name)[0]) for model_name in available_model if
+                len(re.findall("[0-1]\.[0-9]+", model_name)) != 0]
+    index_best_model = np.argmax(accuracy)
+    model = load(model, available_model[index_best_model])
+
+    # remove redundant saved models, only save the one with the highest accuracy
+    available_model.pop(index_best_model)
+    clean(available_model)
+    return model
 
 
-def affected_nodes_by_layer(graph: nx.DiGraph, srcs, depth) :
-    affected = []
-    for src in srcs :
-        bfs_tree = nx.bfs_tree(graph, source=src, depth_limit=depth)
-        nodes = list(bfs_tree.nodes)
-        affected = np.union1d(affected, nodes)
+def affected_nodes_each_layer(edge_dicts: List[Dict[int, torch.Tensor]], srcs: Union[list, set], depth: int) -> defaultdict:
+    affected = defaultdict(set)
+    affected[0] = set(srcs)
+    for i in range(depth) :
+        for node in affected[i]:
+            for edge_dict in edge_dicts:
+                affected[i+1].update(edge_dict[node])
+        affected[i + 1].update(srcs)  # srcs are affected each layer
     return affected
 
 
-def unique_and_location(array:np.ndarray) -> Tuple[np.ndarray, np.ndarray]:  # generated by chatgpt
+def unique_and_location(array: np.ndarray) -> Tuple[np.ndarray, np.ndarray] :  # generated by chatgpt
     # dictionary to store indices
     indices_dict = {}
 
@@ -286,7 +364,7 @@ def burst_sampler(full_edges: np.ndarray, num_edge_changed) -> np.ndarray :
     return flatten_sorted_index_in_edges[:num_edge_changed]
 
 
-def edge_remove(full_edges: np.ndarray, batch_size:int, distribution: str, directed: bool = False) -> Tuple[
+def edge_remove(full_edges: np.ndarray, batch_size: int, distribution: str, directed: bool = False) -> Tuple[
     np.ndarray, np.ndarray] :
     # ATTENTION: RETURN VALUE HAVE DIFFERENT SHAPE!!!!
     # batch size refers to number of undirected edges. If directed edges are removed, remove double the size
@@ -316,6 +394,44 @@ def edge_remove(full_edges: np.ndarray, batch_size:int, distribution: str, direc
     return sample_edges, edges_one_batch_missing
 
 
+import torch
+
+
+def get_graph_dynamics(tensor: torch.Tensor, batch_size: int, stream: str = "mix") -> Tuple[
+    torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor] :
+    """
+    :param tensor: original edge_index
+    :param batch_size: number of streaming edges in a time interval
+    :param mode: operations of edges. insertion, deletion or both.
+    :return: initial_edges, final_edges, inserted_edges, removed_edges
+    """
+    # Ensure batch_size is smaller than tensor's size
+    assert batch_size < tensor.size(1), "batch_size should be smaller than the number of columns in the tensor"
+
+    # Generate random permutation of indices
+    indices = torch.randperm(tensor.size(1))
+
+    if stream == 'add' :
+        # Select columns excluding batch_size number of random columns
+        new_tensor = tensor[:, indices[:-batch_size]]
+        removed_tensor = tensor[:, indices[-batch_size :]]
+        return new_tensor, tensor, removed_tensor, torch.empty((2, 0))
+
+    elif stream == 'delete' :
+        new_tensor = tensor[:, indices[:-batch_size]]
+        removed_tensor = tensor[:, indices[-batch_size :]]
+        return tensor, new_tensor, torch.empty((2, 0)), removed_tensor
+
+    elif stream == 'mix' :
+        set_A_indices = indices[:batch_size // 2]
+        set_B_indices = indices[batch_size // 2 : batch_size]
+        tensor_A = tensor[:, indices[batch_size // 2 :]]
+        tensor_B = tensor[:, torch.cat((indices[:batch_size // 2], indices[batch_size :]))]
+        set_A = tensor[:, set_A_indices]
+        set_B = tensor[:, set_B_indices]
+        return tensor_A, tensor_B, set_A, set_B
+
+
 def is_large(data) :
     return True if data.num_nodes > 50000 else False
 
@@ -338,21 +454,24 @@ def concate_by_id(full: np.ndarray, batch: np.ndarray, position: np.ndarray) -> 
 
     return full
 
-def create_directory(path):  # by chatgpt
-    try:
+
+def create_directory(path) :  # by chatgpt
+    try :
         os.makedirs(path)
         print(f"Directory '{path}' created successfully.")
-    except FileExistsError:
+    except FileExistsError :
         print(f"Directory '{path}' already exists.")
 
-def to_dict(edges: torch.Tensor):
-    edge_dict = {}
+
+# @measure_time
+def to_dict(edges: torch.Tensor) :
+    edge_dict = defaultdict(list)
     for i in range(edges.size(1)) :
         source_node = edges[0, i].item()
         dest_node = edges[1, i].item()
-
-        if source_node not in edge_dict :
-            edge_dict[source_node] = []
-
         edge_dict[source_node].append(dest_node)
     return edge_dict
+
+
+def get_stacked_tensors_from_dict(dictionary: dict, ids):
+    return torch.stack([dictionary[id] for id in ids])
