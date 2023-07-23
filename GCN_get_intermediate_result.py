@@ -10,106 +10,106 @@ import random
 from tqdm import tqdm
 from utils import *
 from GCN import GCN
+from torch_geometric.data import Data
 
+# todo: 改成 {batch_size}_{id} directory里面存 edge_list before and after, timing_result before and after.
+# 对于一个 directory 如果里面已经有了 ground truth files， skip for full graph inference.
 
 @torch.no_grad()
-def test(model, loader, folder:str, postfix: str) :
+def inference_for_intermediate_result(model, loader, folder:str = "", postfix: str = "") :
     model.eval()
     print("Using Neighbour Loader for Full Graph Inference")
-    intermediate_result_each_layer = {}
+    intermediate_result_each_layer = defaultdict(lambda: defaultdict(lambda: torch.empty((0))))
     for batch in tqdm(loader):
         batch = batch.to(device, 'edge_index')
         batch_size = batch.batch_size
         _, batch_result_each_layer, batch_intermediate_result_per_layer = model(batch.x, batch.edge_index)
 
-        # save out_per_layer and intermediate result per layer
+        # save out_per_layer and intermediate timing_result per layer
         for layer in batch_intermediate_result_per_layer :
-            if layer not in intermediate_result_each_layer :
-                intermediate_result_each_layer[layer] = {}
-                intermediate_result_each_layer[layer]['a-'] = torch.empty((0))
-                intermediate_result_each_layer[layer]['a'] = torch.empty((0))
+            # if layer not in intermediate_result_each_layer :
+            #     intermediate_result_each_layer[layer] = {}
+            #     intermediate_result_each_layer[layer]['a-'] = torch.empty((0))
+            #     intermediate_result_each_layer[layer]['a'] = torch.empty((0))
             # 把batch_result_each_layer 按照batch.input_id  concate在一起。
             if len(intermediate_result_each_layer[layer]['a-']) != 0:
                 intermediate_result_each_layer[layer]['a-'] = torch.concat((intermediate_result_each_layer[layer]["a-"],
                                                      batch_intermediate_result_per_layer[layer]["a-"][:batch_size].cpu()))
             else:
-                intermediate_result_each_layer[layer]['a-'] = batch_intermediate_result_per_layer[layer][
-                                                                                "a-"][:batch_size].cpu()
+                intermediate_result_each_layer[layer]['a-'] = batch_intermediate_result_per_layer[layer]["a-"][:batch_size].cpu()
+
             if len(intermediate_result_each_layer[layer]['a']) != 0:
                 intermediate_result_each_layer[layer]['a'] = torch.concat((intermediate_result_each_layer[layer]["a"],
                                                      batch_intermediate_result_per_layer[layer]["a"][:batch_size].cpu()))
             else:
-                intermediate_result_each_layer[layer]['a'] = batch_intermediate_result_per_layer[layer][
-                                                                                "a"][:batch_size].cpu()
+                intermediate_result_each_layer[layer]['a'] = batch_intermediate_result_per_layer[layer]["a"][:batch_size].cpu()
+    if folder != "":
+        for layer in intermediate_result_each_layer:
+            create_directory(osp.join(folder, layer))
+            torch.save(intermediate_result_each_layer[layer]['a-'], osp.join(folder, layer, f"before_aggregation{postfix}.pt"))
+            torch.save(intermediate_result_each_layer[layer]['a'], osp.join(folder, layer, f"after_aggregation{postfix}.pt"))
 
-    for layer in intermediate_result_each_layer:
-        create_directory(osp.join(folder, layer))
-        torch.save(intermediate_result_each_layer[layer]['a-'], osp.join(folder, layer, f"before_aggregation{postfix}.pt"))
-        torch.save(intermediate_result_each_layer[layer]['a'], osp.join(folder, layer, f"after_aggregation{postfix}.pt"))
-
-    return
+    return intermediate_result_each_layer
 
 
 def main():
     parser = argparse.ArgumentParser()
-    # args = general_parser(parser)
-    args = FakeArgs()
+    args = general_parser(parser)
+
+    niters = int(1000 // args.perbatch)  # times for small batch deletion (initial state)
+    print(f"Iterations: {niters}")
+    # args = FakeArgs(dataset="Cora", aggr="min", perbatch=10, stream="mix", interval=50000)
     dataset = load_dataset(args)
-
-    out_folder = osp.join("examples", "intermediate", args.dataset, args.aggr)
-
     print_dataset(dataset)
-    data = dataset[0].to(device)
+    data = dataset[0]
+    timing_sampler(data, args)
 
-    model = GCN(dataset.num_features, args.hidden_channels, dataset.num_classes, args)
-    model = model.to(device)
+    if args.perbatch < 1 :
+        batch_size = int(args.perbatch / 100 * data.num_edges)  # perbatch is [x]%, so divide by 100
+    else :
+        batch_size = int(args.perbatch)
+    print(f"Batch size for streaming graph: {batch_size}")
 
-    available_model = []
-    name_prefix = f"{args.dataset}_GCN_{args.aggr}"
-    for file in os.listdir("examples/trained_model") :
-        if re.match(name_prefix + "_[0-9]+_[0-1]\.[0-9]+\.pt", file) :
-            available_model.append(file)
+    # model = GCN(dataset.num_features, args.hidden_channels, dataset.num_classes, args)
+    # model = load_available_model(model, args).to(device)
 
-    if len(available_model) == 0 :  # no available model, train from scratch
-        print(f"No available model. Please run `python GCN_neighbor_loader.py --dataset {args.dataset} --aggr {args.aggr}`")
+    for i in tqdm(range(niters)):
+        out_folder = osp.join("examples", "intermediate", args.dataset, args.aggr, args.stream, f"batch_size_{batch_size}", str(i))
+        create_directory(out_folder)
 
-    else :  # choose the model with the highest test acc
-        accuracy = [float(re.findall("[0-1]\.[0-9]+", model_name)[0]) for model_name in available_model if
-                    len(re.findall("[0-1]\.[0-9]+", model_name)) != 0]
-        index_best_model = np.argmax(accuracy)
-        model = load(model, available_model[index_best_model])
-        loader = data_loader(data, num_layers=2, num_neighbour_per_layer=-1, separate=False)  # load all neighbours
-        _ = test(model, loader, out_folder, "")  # full graph result
+        # edge selection
+        initial_edges, final_edges, inserted_edges, removed_edges = get_graph_dynamics(data.edge_index, batch_size, args.stream)
+        torch.save(initial_edges, (osp.join(out_folder, "initial_edges.pt")))
+        torch.save(final_edges, (osp.join(out_folder, "final_edges.pt")))
+        if inserted_edges.shape[1] :
+            torch.save(inserted_edges, (osp.join(out_folder, "inserted_edges.pt")))
+        if removed_edges.shape[1] :
+            torch.save(removed_edges, (osp.join(out_folder, "removed_edges.pt")))
 
-        if args.perbatch < 1:
-            batch_size = int(args.perbatch / 100 * data.num_edges)  # perbatch is [x]%, so divide by 100
-        else:
-            batch_size = int(args.perbatch)
-        print(f"Batch size for streaming graph: {batch_size}")
+        # fake input for debuging
+        # out_folder = osp.join("examples", "intermediate", args.dataset, args.aggr, args.stream,
+        #                       f"batch_size_{batch_size}", '7')
+        # folder = osp.join("examples", "intermediate", "Cora", "min", 'add',"batch_size_1")
+        # data_dir = '7'
+        # initial_edges = torch.load(osp.join(folder, data_dir, "initial_edges.pt"))
+        # final_edges = torch.load(osp.join(folder, data_dir, "final_edges.pt"))
+        # inserted_edges = torch.load(osp.join(folder, data_dir, "inserted_edges.pt"))
+        # removed_edges = torch.load(osp.join(folder, data_dir, "removed_edges.pt"))
 
-        # edge selection according to args.distribution
-        # sample_edges, initial_edges = edge_remove(data.edge_index.cpu().numpy(), batch_size, args.distribution,
-        #                                           data.is_directed())
-        # initial_edges = torch.from_numpy(initial_edges).to(device)  # from numpy to torch tensor
-        # sample_nodes = np.unique(sample_edges.reshape((-1,)))
 
-        edge_index = data.edge_index.cpu()
-        sample_edges = torch.reshape(edge_index[:, 2569:2570], (1,2))  # directly remove the first column
-        initial_edges = torch.concat((edge_index[:, :2569], edge_index[:, 2570:]), dim=1)
-
-        ## run inference for the initial graph (before edge adding).
-        data2 = data  # the bulky data.x is not changed, directly change edge index on the same varaible. They are not used together.
-        data2.edge_index = initial_edges  # todo: 不是很确定这里改变了edge_index后，会不会产生isolated node，进而影响后面的判断（by index)？
-        data2.edge_index.to(device)
-
-        loader = data_loader(data2, num_layers=2, num_neighbour_per_layer=-1, separate=False)  # select all
-        if len(sample_edges)==1:
-            post_fix = f"_({sample_edges[0,0]}, {sample_edges[0,1]})"
-        else:
-            post_fix = "_" + str(random.randint(0, 99))
-            np.save(osp.join(out_folder, post_fix+".npy"), sample_edges)
-
-        _ = test(model, loader, out_folder, post_fix)  # full graph result
+        # # Final Result
+        # data2 = Data(x=data.x, edge_index=final_edges)
+        # data2.to(device)
+        # loader = data_loader(data2, num_layers=2, num_neighbour_per_layer=-1, separate=False)
+        # _ = inference_for_intermediate_result(model, loader, out_folder, "_final")  #
+        #
+        #
+        # ## run inference for the initial graph (before edge adding).
+        # data3 = Data(x=data.x, edge_index=initial_edges)
+        # data3.to(device)
+        # post_fix = "_initial"
+        # loader2 = data_loader(data3, num_layers=2, num_neighbour_per_layer=-1, separate=False)
+        # _ = inference_for_intermediate_result(model, loader2, out_folder, post_fix)
 
 
 if __name__ == '__main__':

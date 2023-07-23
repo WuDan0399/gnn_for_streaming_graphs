@@ -22,6 +22,7 @@ class GCN(torch.nn.Module) :
                              normalize=False, aggr=args.aggr, save_intermediate=args.save_int)
 
     def forward(self, x, edge_index, edge_weight=None):
+        # 把timing 扔到 intermediate_result_per_layer, intermediate_result 里面
         out_per_layer = {}
         intermediate_result_per_layer = {}
 
@@ -31,16 +32,15 @@ class GCN(torch.nn.Module) :
         x = F.dropout(x, p=0.5, training=self.training)   # prevent overfitting, cannot sparsify the input\network for inference
         x, intermediate_result = self.conv1(x, edge_index, edge_weight)
         x = x.relu()
-        if self.save_int :
-            intermediate_result_per_layer["layer1"] = intermediate_result
-            out_per_layer["conv1"] = x.detach()
+
+        intermediate_result_per_layer["layer1"] = intermediate_result  # must contains time info, could contain intermediate
+        out_per_layer["conv1"] = x.detach()
 
         x = F.dropout(x, p=0.5, training=self.training)
         x, intermediate_result = self.conv2(x, edge_index, edge_weight)
 
-        if self.save_int:
-            intermediate_result_per_layer["layer2"] = intermediate_result
-            out_per_layer["conv2"] = x.detach()
+        intermediate_result_per_layer["layer2"] = intermediate_result
+        out_per_layer["conv2"] = x.detach()
 
         return x, out_per_layer, intermediate_result_per_layer
 

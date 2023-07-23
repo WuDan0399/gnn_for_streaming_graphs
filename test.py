@@ -186,7 +186,7 @@ def workflow_test(model_path, folder_intermediate, src, dst):
     task_dict = group_task_queue(task_q_bkp)
 
     for destination in task_dict :
-        aggred_dst = intm["base"]["layer2"]['after'][destination]  # old aggregated result
+        aggred_dst = intm["base"]["layer2"]['after'][destination]  # old aggregated timing_result
         # change_mask = torch.zeros(message.shape, dtype=torch.bool)
 
         old_message_list = torch.stack([msg for _, msg in task_dict[destination]["delete"]])
