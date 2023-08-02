@@ -1,3 +1,12 @@
+# Preparation:
+1. conda environment: baseline and modified.
+        baseline: change aggr parameter in __init__ function to "min" for SAGEConv and 'max' for GINConv
+        modifed: a. change aggr parameter in __init__ function same as baseline
+                 b. add save_int parameter in __init__ to save intermediate values
+                 c. add code to save and return intermediate values when not training and save_int==True
+
+
+
 GCN.py [baselinePyG]
     # patience epochs interval #
     Full graph GCN training.
@@ -19,6 +28,25 @@ GCN_get_intermediate_result.py [gnnEnv]
 my_GCN.py [gnnEnv]
     # perbatch, save_int, stream #
     Use incremental update to get the result. Use --save_int if the intermediate result is not saved previously.
+
+
+ignite.py [gnnEnv]
+    Base framework for ignite method
+
+ignite_gcn.py [gnnEnv]
+    # perbatch, save_int, stream, model #
+    Customized for GCN, extending base ignite framwork.
+
+ignite_sage.py [gnnEnv] 
+    # perbatch, save_int, stream, model #
+    Customized for SAGE, extending base ignite framwork. No sampling implemented.
+
+ignite_gcn.py [gnnEnv]
+    # binary, perbatch, save_int, stream, model #
+    Customized for GIN, extending base ignite framwork.
+
+pureGIN.py [baselinePyG]
+    # binary, dataset, aggr #
 
 
 

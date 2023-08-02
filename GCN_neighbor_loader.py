@@ -95,16 +95,16 @@ def main():
     ], lr=args.lr)  # Only perform weight-decay on first convolution.
 
 
-    if args.use_gdc :
-        transform = T.GDC(
-            self_loop_weight=1,
-            normalization_in='sym',
-            normalization_out='col',
-            diffusion_kwargs=dict(method='ppr', alpha=0.05),
-            sparsification_kwargs=dict(method='topk', k=128, dim=0),
-            exact=True,
-        )
-        data = transform(data)
+    # if args.use_gdc :
+    #     transform = T.GDC(
+    #         self_loop_weight=1,
+    #         normalization_in='sym',
+    #         normalization_out='col',
+    #         diffusion_kwargs=dict(method='ppr', alpha=0.05),
+    #         sparsification_kwargs=dict(method='topk', k=128, dim=0),
+    #         exact=True,
+    #     )
+    #     data = transform(data)
 
 
     available_model = []

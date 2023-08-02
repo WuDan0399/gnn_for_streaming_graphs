@@ -26,21 +26,23 @@ class GCN(torch.nn.Module) :
         out_per_layer = {}
         intermediate_result_per_layer = {}
 
-        if self.save_int:
-            out_per_layer["input"] = x.detach()
+        # if self.save_int:
+        #     out_per_layer["input"] = x.detach()
 
         x = F.dropout(x, p=0.5, training=self.training)   # prevent overfitting, cannot sparsify the input\network for inference
         x, intermediate_result = self.conv1(x, edge_index, edge_weight)
         x = x.relu()
 
-        intermediate_result_per_layer["layer1"] = intermediate_result  # must contains time info, could contain intermediate
-        out_per_layer["conv1"] = x.detach()
+        if self.save_int:
+            intermediate_result_per_layer["layer1"] = intermediate_result  # must contains time info, could contain intermediate
+            out_per_layer["conv1"] = x.detach()
 
         x = F.dropout(x, p=0.5, training=self.training)
         x, intermediate_result = self.conv2(x, edge_index, edge_weight)
 
-        intermediate_result_per_layer["layer2"] = intermediate_result
-        out_per_layer["conv2"] = x.detach()
+        if self.save_int:
+            intermediate_result_per_layer["layer2"] = intermediate_result
+            out_per_layer["conv2"] = x.detach()
 
         return x, out_per_layer, intermediate_result_per_layer
 
@@ -98,16 +100,16 @@ def main():
     ], lr=args.lr)  # Only perform weight-decay on first convolution.
 
 
-    if args.use_gdc :
-        transform = T.GDC(
-            self_loop_weight=1,
-            normalization_in='sym',
-            normalization_out='col',
-            diffusion_kwargs=dict(method='ppr', alpha=0.05),
-            sparsification_kwargs=dict(method='topk', k=128, dim=0),
-            exact=True,
-        )
-        data = transform(data)
+    # if args.use_gdc :
+    #     transform = T.GDC(
+    #         self_loop_weight=1,
+    #         normalization_in='sym',
+    #         normalization_out='col',
+    #         diffusion_kwargs=dict(method='ppr', alpha=0.05),
+    #         sparsification_kwargs=dict(method='topk', k=128, dim=0),
+    #         exact=True,
+    #     )
+    #     data = transform(data)
 
 
     available_model = []
@@ -134,7 +136,7 @@ def main():
                 if it_patience >= patience:
                     print(f"No accuracy improvement {best_test_acc} in {patience} epochs. Early stopping.")
                     break
-        save(best_model_state_dict, epoch, tmp_test_acc, name_prefix)
+        save(best_model_state_dict, epoch, best_test_acc, name_prefix)
 
     else :  # choose the model with the highest test acc
         accuracy = [float(re.findall("[0-1]\.[0-9]+", model_name)[0]) for model_name in available_model if

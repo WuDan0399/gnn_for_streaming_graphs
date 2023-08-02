@@ -1,7 +1,7 @@
-model.conv1.lin(x)
+self.model.conv1.lin(x)
 min
-x + model.conv1.bias
+x + self.model.conv1.bias
 x.relu()
-model.conv2.lin(x)
+self.model.conv2.lin(x)
 min
-x + model.conv2.bias
+x + self.model.conv2.bias

@@ -1,33 +1,32 @@
 # From https://github.com/pyg-team/pytorch_geometric/blob/master/examples/compile/gin.py
 
 import os.path as osp
+from tqdm import tqdm
 
 import torch
 import torch.nn.functional as F
 
-import torch_geometric
 from torch_geometric.nn import MLP, GINConv, global_add_pool
 
 from utils import *
 
 
-class GIN(torch.nn.Module):
-    def __init__(self, in_channels, out_channels, args):
+class pureGIN(torch.nn.Module):
+    def __init__(self, in_channels, out_channels):
         super().__init__()
 
         self.convs = torch.nn.ModuleList()
         for _ in range(5):
-            mlp = MLP([in_channels, 64, 64])  # original 32
-            self.convs.append(GINConv(mlp, train_eps=False, save_intermediate=args.save_int))
+            mlp = MLP([in_channels, 64, 64], norm=None)  # original 32
+            self.convs.append(GINConv(mlp, train_eps=False))
             in_channels = 64
 
-        self.mlp = MLP([64, 64, out_channels], norm=None, dropout=0.5)
+        self.mlp = MLP([64, 64, out_channels], dropout=0.5)
 
     def forward(self, x, edge_index, batch):
 
         for i, conv in enumerate(self.convs):
             x = conv(x, edge_index)
-            print(x)
             x = x.relu()
 
         x = global_add_pool(x, batch)
@@ -38,11 +37,10 @@ def train(model, train_loader, optimizer):
     model.train()
 
     total_loss = 0
-    for data in train_loader:
+    for data in tqdm(train_loader):
         data = data.to(device)
         optimizer.zero_grad()
-        # out = model(data.x, data.edge_index, data.batch)
-        out = model(data.x, data.edge_index,torch.zeros((data.x.shape[0],), dtype=torch.int64))
+        out = model(data.x, data.edge_index, data.batch)
         loss = F.cross_entropy(out, data.y)
         loss.backward()
         optimizer.step()
@@ -57,31 +55,24 @@ def test(model, loader):
     total_correct = 0
     for data in loader:
         data = data.to(device)
-        # pred = model(data.x, data.edge_index, data.batch).argmax(dim=-1)
-        pred = model(data.x, data.edge_index, torch.zeros((data.x.shape[0],), dtype=torch.int64)).argmax(dim=-1)
+        pred = model(data.x, data.edge_index, data.batch).argmax(dim=-1)
         total_correct += int((pred == data.y).sum())
     return total_correct / len(loader.dataset)
 
 
 
 if __name__ == '__main__':
+    # args = FakeArgs(dataset="reddit", aggr="max", binary=True, epochs=1)
     parser = argparse.ArgumentParser()
     args = general_parser(parser)
     dataset = load_dataset(args)
 
-    model = GIN(dataset.num_features, dataset.num_classes, args).to(device)
-
-    print_dataset(dataset)
-    data = dataset[0].to(device)
+    data = dataset[0]
     add_mask(data)
-    print_data(data)
+    timing_sampler(data, args)
 
-    # Compile the model into an optimized version:
-    # Note that `compile(model, dynamic=True)` does not work yet in PyTorch 2.0, so
-    # we use `transforms.Pad` and static compilation as a current workaround.
-    # See: https://github.com/pytorch/pytorch/issues/94640
-    # model = torch_geometric.compile(model)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+    # kwargs = {'batch_size' : 1, 'num_workers' : 1, 'persistent_workers' : False}
+    kwargs = {'batch_size' : 16, 'num_workers' : 4, 'persistent_workers' : False}
 
     available_model = []
     name_prefix = f"{args.dataset}_GIN_{args.aggr}"
@@ -94,14 +85,27 @@ if __name__ == '__main__':
         best_model_state_dict = None
         patience = args.patience
         it_patience = 0
-        train_loader, val_loader, test_loader = data_loader(data, num_layers=5, num_neighbour_per_layer=-1,
-                                                            separate=True, disjoint=True)
+
+        node_indices = torch.arange(data.num_nodes)
+        if data.num_nodes > 20000 :
+            train_indices = node_indices[:int(data.num_nodes * 0.3)]
+            test_indices = node_indices[int(data.num_nodes * 0.3):int(data.num_nodes * 0.35)]
+        else:
+            train_indices = node_indices[:int(data.num_nodes * 0.8)]
+            test_indices = node_indices[int(data.num_nodes * 0.8):]
+
+        train_loader = EgoNetDataLoader(data, train_indices, k=5, **kwargs)
+        test_loader = EgoNetDataLoader(data, test_indices, k=5, **kwargs)
+
+        sample_batch = next(iter(train_loader))
+        model = pureGIN(sample_batch.x.shape[1], 2).to(device)
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+
         for epoch in range(1, args.epochs + 1):
             loss = train(model, train_loader, optimizer)
-            train_acc = test(model, train_loader)
+            # train_acc = test(model, train_loader)
             test_acc = test(model, test_loader)
-            print(f'Epoch: {epoch:03d}, Loss: {loss:.4f}, Train: {train_acc:.4f}, '
-                  f'Test: {test_acc:.4f}')
+            print(f'Epoch: {epoch:03d}, Loss: {loss:.4f}, Test: {test_acc:.4f}')
             if best_test_acc < test_acc :
                 best_test_acc = test_acc
                 best_model_state_dict = model.state_dict()
@@ -112,3 +116,24 @@ if __name__ == '__main__':
                     print(f"No accuracy improvement {best_test_acc} in {patience} epochs. Early stopping.")
                     break
         save(best_model_state_dict, epoch, best_test_acc, name_prefix)
+    else:
+        accuracy = [float(re.findall("[0-1]\.[0-9]+", model_name)[0]) for model_name in available_model if
+                    len(re.findall("[0-1]\.[0-9]+", model_name)) != 0]
+        index_best_model = np.argmax(accuracy)
+        
+        node_indices = torch.arange(data.num_nodes)
+        loader = EgoNetDataLoader(data, node_indices, **kwargs)
+
+        sample_batch = next(iter(loader))
+        model = pureGIN(sample_batch.x.shape[1], 2).to(device)
+        model = load(model, available_model[index_best_model])
+
+        start = time.perf_counter()
+        for _ in tqdm(range(10)):
+            test_acc = test(model, loader)
+        end = time.perf_counter()
+        print(f'Full Graph. Inference time: {(end - start)/10:.4f} seconds for 10 iterations.')
+        print(f'Test: {test_acc:.4f}')
+
+        available_model.pop(index_best_model)
+        clean(available_model)

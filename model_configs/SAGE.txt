@@ -1,0 +1,8 @@
+min
+self.model.convs[0].lin_l(x)
+user_apply
+x.relu()
+min
+self.model.convs[1].lin_l(x)
+user_apply
+x.relu()
