@@ -1,5 +1,4 @@
 import argparse
-import multiprocessing
 import os
 import os.path as osp
 import re
@@ -13,16 +12,20 @@ from typing import Tuple, Union, List, Dict
 import numpy as np
 import torch
 import torch_geometric as pyg
-from torch_geometric.datasets import Reddit, Planetoid, CitationFull, Yelp, AmazonProducts
+from torch_geometric.datasets import Reddit, Planetoid, CitationFull, Yelp
 from torch_geometric.loader import NeighborLoader
 from torch_geometric.typing import OptTensor
+from torch_geometric.utils import degree
+from torch.utils.data import DataLoader
+from torch_geometric.utils import k_hop_subgraph
+from torch_geometric.data import Data, Batch
 
 np.random.seed(0)
 torch.manual_seed(0)
 torch.set_printoptions(precision=10)
 
-# root = os.getenv("DYNAMIC_GNN_ROOT")
-root = "/Users/wooden/PycharmProjects/GNNAccEst/"
+root = os.getenv("DYNAMIC_GNN_ROOT")
+# root = "/home/dan/wooden/GNN/"
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class bcolors:
@@ -37,17 +40,12 @@ class bcolors:
     UNDERLINE = '\033[4m'
 
 
-class Task :
-    def __init__(self, op, src, dst, msg) :
-        self.op = op
-        self.src = src
-        self.dst = dst
-        self.msg = msg
-
-
 class FakeArgs :
-    def __init__(self, dataset='Cora', use_gdc=False, aggr='min', save_int=True, hidden_channels=256, perbatch=1, stream='add', interval:int=50000) :
+    def __init__(self, dataset='Cora', model="GCN", use_gdc=False, patience=2, aggr='min', 
+                 save_int=True, hidden_channels=256, epochs = 10,
+                 perbatch=1, stream='add', interval=50000, it=0, binary=False) :
         self.dataset = dataset
+        self.model = model
         self.use_gdc = use_gdc
         self.aggr = aggr
         self.save_int = save_int
@@ -55,6 +53,34 @@ class FakeArgs :
         self.perbatch = perbatch
         self.stream = stream
         self.interval = interval
+        self.it = it
+        self.binary = binary
+        self.patience = patience
+        self.epochs = epochs
+
+
+class EgoNetDataLoader(DataLoader):
+    def __init__(self, data, node_indices, batch_size, k=5, num_workers=0, persistent_workers=False):
+        if data.device != torch.device('cpu'):
+            print("Check the code, data should be on cpu before calling EgoNetDataLoader.__init__. Otherwise, could fail to initialize CUDA.")
+        
+        self.data = data
+        self.node_indices = node_indices
+        self.batch_size = batch_size
+        self.k = k
+        super().__init__(node_indices, batch_size=batch_size, collate_fn=self.collate_fn, 
+                         num_workers=num_workers, persistent_workers=persistent_workers)
+    
+    def collate_fn(self, batch_node_indices):
+        batch_data_list = []
+        for node_idx in batch_node_indices:
+            subset, edge_index, _, _ = k_hop_subgraph(
+                node_idx.item(), self.k, self.data.edge_index, relabel_nodes=True,
+                num_nodes=None, flow="target_to_source", directed=False)
+            x = self.data.x[subset]
+            y = self.data.y[node_idx]
+            batch_data_list.append(Data(x=x, edge_index=edge_index, y=y))
+        return Batch.from_data_list(batch_data_list)
 
 
 def group_task_queue(task_q: list) -> dict :
@@ -163,14 +189,9 @@ def data_loader(data, input_nodes = None,
                 num_layers: int = 2,
                 num_neighbour_per_layer: int = -1,
                 separate: bool = True,
-                persistent_workers: bool = True, disjoint=False) :
-    if multiprocessing.cpu_count() < 10 :
-        kwargs = {'batch_size' : 8, 'num_workers' : 1, 'persistent_workers' : persistent_workers}
-    else :
-        kwargs = {'batch_size' : 16, 'num_workers' : 4, 'persistent_workers' : persistent_workers}
-    if disjoint == True:
-        kwargs['batch_size'] = 1
-    # print(kwargs)
+                persistent_workers: bool = False) :
+    # kwargs = {'batch_size' : 8, 'num_workers' : 1, 'persistent_workers' : persistent_workers}
+    kwargs = {'batch_size' : 16, 'num_workers' : 4, 'persistent_workers' : persistent_workers}
     if separate :
         train_loader = NeighborLoader(data, num_neighbors=[num_neighbour_per_layer] * num_layers, shuffle=True,
                                       input_nodes=data.train_mask, **kwargs)
@@ -209,14 +230,14 @@ def print_data(data: pyg.data.Data) -> None :
 
 def general_parser(parser: argparse.ArgumentParser) -> argparse.Namespace :
     parser.add_argument("-d", '--dataset', type=str, default='yelp')
-
+    parser.add_argument("--model", type=str, default="GCN")
     parser.add_argument('--hidden_channels', type=int, default=256)
     parser.add_argument('--lr', type=float, default=0.01)
     parser.add_argument('--epochs', type=int, default=500)
     parser.add_argument('--aggr', type=str, default="min")
     parser.add_argument('--patience', type=int, default=50)
     parser.add_argument('--use_gdc', action='store_true', help='Use GDC')
-    parser.add_argument('--wandb', action='store_true', help='Track experiment')
+    parser.add_argument('--binary', action='store_true', help='Use one-hot encoding of node degree as node attribute, fake labels of ego networks are generated')
     parser.add_argument("--distribution", default="random",
                         type=str, help="distribution of edges in one batch (random/burst/combine)")
     parser.add_argument("-l", "--nlayers", default=5,
@@ -279,37 +300,55 @@ def timing_sampler(data: pyg.data.Data, args) :
     return
 
 
+def one_hot_fake_label(dataset: pyg.data.Data, max_degree: int=1000) -> list:
+    new_dataset = []
+    for data in dataset:
+        node_degree = degree(data.edge_index[0])  # get outdegree of each node
+        real_max_degree = torch.max(node_degree).item()  # get the max degree
+        node_degree = torch.clamp(node_degree, max=max_degree - 1)  # Limit to max_degree
+        unique_degree, indices = torch.unique(node_degree, return_inverse=True)  # Find the unique degree and their indices in the original tensor
+        one_hot_size = max(len(unique_degree),min(int(real_max_degree), max_degree))  # The size of one-hot encoding is the max degree
+        new_x = torch.zeros((len(node_degree), one_hot_size), dtype=torch.float)  # Transform the original tensor into one-hot encoding
+        new_x[torch.arange(len(node_degree)), indices] = 1
+        new_y = torch.randint(0, 2, data.y.shape[:1], dtype=torch.long)
+        print(f"New node attribute shape: {new_x.shape}")
+        data.x = new_x
+        data.y = new_y
+        new_dataset.append(data)
+    return new_dataset
+
 def load_dataset(args: argparse.Namespace) :
     if args.dataset == "Cora" :  # class
         # 2,708,  10,556,  1,433 , 7
-        dataset = Planetoid(osp.join(root, "datasets", "node_classification", "Planetoid"), "Cora")
+        dataset = Planetoid(osp.join(root, "datasets", "Planetoid"), "Cora")
     elif args.dataset == "PubMed" :  # class
-        dataset = Planetoid(osp.join(root, "datasets","node_classification", "Planetoid"), "PubMed")
+        dataset = Planetoid(osp.join(root, "datasets", "Planetoid"), "PubMed")
     elif args.dataset == 'reddit' :  # class
-        dataset = Reddit(osp.join(root, "datasets", "node_classification", "Reddit"))
+        dataset = Reddit(osp.join(root, "datasets", "Reddit"))
     elif args.dataset == "cora" :  # class
-        dataset = CitationFull(osp.join(root, "datasets", "node_classification", "CitationFull"), "Cora")
+        dataset = CitationFull(osp.join(root, "datasets", "CitationFull"), "Cora")
     elif args.dataset == "yelp" :  # tasks Non one-hot
-        dataset = Yelp(osp.join(root, "datasets", "node_classification", "Yelp"))
-    # elif args.dataset == "amazon" :  # class, but on-hot representation
-    #     dataset = AmazonProducts(osp.join(root, "datasets", "node_classification", "Amazon"))
-        # for data in dataset : # Actually only one data
-        #     data.y = data.y.type(torch.float32)
-        #     data.y = data.y.argmax(dim=-1)
+        dataset = Yelp(osp.join(root, "datasets", "Yelp"))
     else :
-        print("No such dataset. Available: Cora/cora/PubMed/reddit/yelp/amazon")
+        print("No such dataset. Available: Cora/cora/PubMed/reddit/yelp")
+    
+    if args.binary:
+        # one-hot encoding of node degree as node attribute, transform the dataset into a binary classification dataset
+        print("Processing: change to one-hot node attribute, generate fake labels")
+        dataset = one_hot_fake_label(dataset, max_degree=500)
+        # todo: check whether the dataset is changed
     return dataset
 
 
 def load_available_model(model, args: argparse.Namespace) :
     available_model = []
-    name_prefix = f"{args.dataset}_GCN_{args.aggr}"
+    name_prefix = f"{args.dataset}_{args.model}_{args.aggr}"
     for file in os.listdir("examples/trained_model") :
         if re.match(name_prefix + "_[0-9]+_[0-1]\.[0-9]+\.pt", file) :
             available_model.append(file)
     if len(available_model) == 0 :  # no available model, train from scratch
         print(
-            f"No available model. Please run `python GCN_neighbor_loader.py --dataset {args.dataset} --aggr {args.aggr}`")
+            f"No available model. Please run `python {args.model}.py --dataset {args.dataset} --aggr {args.aggr}`")
         return None
 
     # choose the model with the highest test acc
@@ -324,7 +363,21 @@ def load_available_model(model, args: argparse.Namespace) :
     return model
 
 
-def affected_nodes_each_layer(edge_dicts: List[Dict[int, torch.Tensor]], srcs: Union[list, set], depth: int) -> defaultdict:
+
+def count_layers(model):
+    # Count number of conv layers.
+    count = 0
+    for child in model.children():
+        if any([isinstance(child, cls) for cls in vars(pyg.nn.conv).values() if isinstance(cls, type)]):
+            count += 1
+        elif len(list(child.children())) > 0: 
+            count += count_layers(child)
+    # print(f"Number of layers: {count}")
+    return count
+
+
+def affected_nodes_each_layer(edge_dicts: List[Dict[int, torch.Tensor]], srcs: Union[list, set],
+                              depth: int, self_loop: bool = False) -> defaultdict:
     affected = defaultdict(set)
     affected[0] = set(srcs)
     for i in range(depth) :
@@ -332,6 +385,8 @@ def affected_nodes_each_layer(edge_dicts: List[Dict[int, torch.Tensor]], srcs: U
             for edge_dict in edge_dicts:
                 affected[i+1].update(edge_dict[node])
         affected[i + 1].update(srcs)  # srcs are affected each layer
+        if self_loop:  # for gin and sage, changes also propagate along self-loop.
+            affected[i + 1].update(affected[i])
     return affected
 
 
@@ -350,6 +405,25 @@ def unique_and_location(array: np.ndarray) -> Tuple[np.ndarray, np.ndarray] :  #
     element_locations = list(indices_dict.values())
 
     return unique_elements, element_locations
+
+
+def partition_by_aggregation_phase(model_configs: List[str], aggr: str) -> List[List[str]] :
+    sublists = []
+    sublist = []
+    for idx, elem in enumerate(model_configs):
+        if elem == aggr:
+            if sublist:  # if the sublist is not empty, add it to the sublists
+                sublists.append(sublist)
+            sublist = [elem]  # start a new sublist starting with the pattern
+        else:
+            sublist.append(elem)
+        # at the end of the list, add the remaining sublist
+        if idx == len(model_configs) - 1:
+            sublists.append(sublist)
+    if sublists[0][0] != aggr:  # if the first sublist doesn't contain the aggr, remove it
+        sublists.pop(0)
+    return sublists
+
 
 
 def burst_sampler(full_edges: np.ndarray, num_edge_changed) -> np.ndarray :
