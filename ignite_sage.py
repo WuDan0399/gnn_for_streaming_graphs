@@ -36,7 +36,7 @@ def main() :
     intr_result_dir = osp.join("examples", "intermediate", args.dataset, args.aggr, args.stream,
                                f"batch_size_{batch_size}")
 
-    starter = ignite_sage(model, "model_configs/SAGE.txt", intr_result_dir)
+    starter = ignite_sage(model, "model_configs/SAGE.txt", intr_result_dir, verify=True)
 
     condition_distribution, exec_time_dist = starter.batch_incremental_inference(data, data_it=args.it)
 

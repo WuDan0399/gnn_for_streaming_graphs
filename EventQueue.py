@@ -73,13 +73,15 @@ class EventQueue:
         self.event_buffer_accumulative.clear()
         self.event_buffer_user.clear()
         self.message_buffer.clear()
-
+    
+    def default_factory(self):
+        return defaultdict(list)
 
     def reduce(self, monotonic_aggregator:Callable,
                accumulative_aggregator:Callable,
                user_defined_reduce_function:Callable) -> dict :
         # First, group tasks by 'dst' and 'op'
-        task_dict = defaultdict(lambda : defaultdict(list))
+        task_dict = defaultdict(self.default_factory)
         for task in chain(self.event_buffer_monotonic, self.event_buffer_accumulative, self.event_buffer_user):
             message = self.message_buffer[task.msg_idx]
             task_dict[task.dst][task.op].append(message)
