@@ -18,12 +18,12 @@ class GIN(torch.nn.Module):
 
         self.convs = torch.nn.ModuleList()
         for _ in range(5):
-            mlp = MLP([in_channels, 64, 64])  # original 32
+            mlp = MLP([in_channels, 64, 64], norm=None)  # original 32
             self.convs.append(GINConv(mlp, train_eps=False,
                               save_intermediate=self.save_int))
             in_channels = 64
 
-        self.mlp = MLP([64, 64, out_channels], norm=None, dropout=0.5)
+        self.mlp = MLP([64, 64, out_channels], dropout=0.5)
 
     def forward(self, x, edge_index, batch, ptr=None):
         out_per_layer = {}

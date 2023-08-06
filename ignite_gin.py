@@ -25,7 +25,14 @@ class ignite_gin(ignite):
         return torch.maximum(message_a, message_b)
 
     def inc_aggregator(self, message_list: torch.Tensor):
-        return torch.max(message_list, dim=0).values
+        return torch.max(message_list, dim=0)
+    
+    def monotonic_aggregator(self, messages: list):
+        if len(messages) == 2:
+            return torch.maximum(messages[0], messages[1])
+        else:
+            return torch.max(torch.stack(messages), dim=0).values
+
 
 
 
