@@ -49,6 +49,7 @@ def train(model, train_loader, optimizer, epoch):
 
 @torch.no_grad()
 def test(model, loader):
+    print(torch.get_num_threads())
     model.eval()
 
     total_examples = total_correct = 0

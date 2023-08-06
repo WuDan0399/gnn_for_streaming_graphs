@@ -8,6 +8,7 @@ from utils import *
 from torch_geometric.data import Data
 from get_intermediate_result import inference_for_intermediate_result
 
+import multiprocessing
 
 class ignite:
 
@@ -50,7 +51,7 @@ class ignite:
         return torch.minimum(message_a, message_b)
 
     def inc_aggregator(self, message_list: torch.Tensor):
-        return torch.min(message_list, dim=0).values
+        return torch.min(message_list, dim=0)
 
 
     def monotonic_aggregator(self, messages: list):
@@ -128,7 +129,7 @@ class ignite:
                             message_list = intm_initial[f"layer{it_layer}"]['before'][neighbours]
                         else:
                             message_list = get_stacked_tensors_from_dict(intm_initial[f"layer{it_layer}"]['before'], neighbours)
-                        changed_aggred_dst = self.inc_aggregator(message_list)
+                        changed_aggred_dst = self.inc_aggregator(message_list).values
                     else:
                         changed_aggred_dst = torch.zeros(aggred_dst.shape)  # if no message, get 0s
                     changed = True
@@ -136,6 +137,7 @@ class ignite:
                 else:
                     masked_new_old_message = torch.stack((aggregated_new_message[remove_mask], aggregated_old_message[remove_mask]))
                     aggregated_new_old_message = self.inc_aggregator(masked_new_old_message)
+                    print(aggregated_new_old_message)
                     if torch.sum(aggregated_new_old_message.indices) != 0:
                         # 有old values dominates的值， 无法恢复，重新计算
                         # print(f"recomputed {destination}")
@@ -147,7 +149,7 @@ class ignite:
                             message_list = get_stacked_tensors_from_dict(
                                 intm_initial[f"layer{it_layer}"]['before'],
                                 neighbours)
-                        changed_aggred_dst = self.inc_aggregator(message_list)
+                        changed_aggred_dst = self.inc_aggregator(message_list).values
                         changed = True
                     else:
                         # print(f"[covered] incremental compute {destination}")

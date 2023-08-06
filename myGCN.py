@@ -4,10 +4,10 @@ import os
 import torch
 from tqdm import tqdm
 from GCN import GCN
-from TaskQueue import *
+from EventQueue import *
 from utils import *
 from torch_geometric.data import Data
-from GCN_get_intermediate_result import inference_for_intermediate_result
+from get_intermediate_result import inference_for_intermediate_result
 
 def inter_layer_calculate(it_layer:int, model_config:list, model, destination:int, changed_aggred_dst:torch.Tensor):
     # TODO: [DEBUG] the interlayer calculation does not give exactly the same result as in the model.
@@ -41,12 +41,12 @@ def incremental_inference(model, inititial_out_edge_dict: dict, current_out_edge
 
     # Initial Tasks
     for src, dest in inserted_edges:
-        task_q.push_task('add', src, dest, intm_initial["layer1"]['before'][src])
+        task_q.push_task('add',  dest, intm_initial["layer1"]['before'][src])
         # TODO: prob 1
         # task_q.push_task('add', src, dest, intm_final["layer1"]['before'][src])
 
     for src, dest in removed_edges:
-        task_q.push_task('delete', src, dest, intm_initial["layer1"]['before'][src])
+        task_q.push_task('delete', dest, intm_initial["layer1"]['before'][src])
 
     # message value after the corresponding message is consumed,e.g., after all messages in this layer is consumed.
     task_dict = task_q.reduce("min")
@@ -130,7 +130,7 @@ def incremental_inference(model, inititial_out_edge_dict: dict, current_out_edge
                 if it_layer < nlayer :
                     # TODO: prob 1
                     # next_layer_before_aggregation = intm_final[f"layer{it_layer + 1}"]['before'][destination]
-                    task_q_bkp.bulky_push(destination, inititial_out_edge_dict[destination], current_out_edge_dict[destination],
+                    task_q_bkp.bulky_push(inititial_out_edge_dict[destination], current_out_edge_dict[destination],
                                           intm_initial[f"layer{it_layer + 1}"]['before'][destination],
                                           next_layer_before_aggregation)
                     # propagated_nodes.add(destination)
@@ -146,7 +146,7 @@ def incremental_inference(model, inititial_out_edge_dict: dict, current_out_edge
         if it_layer<nlayer:  # end of layer warp up.
             # add task for removed edges each layer, delete the old message before the message changes
             for src, dest in removed_edges :
-                task_q_bkp.push_task('delete', src, dest, intm_initial[f"layer{it_layer + 1}"]['before'][src])
+                task_q_bkp.push_task('delete', dest, intm_initial[f"layer{it_layer + 1}"]['before'][src])
 
             # update the next layer input
             for node in out:
@@ -154,7 +154,7 @@ def incremental_inference(model, inititial_out_edge_dict: dict, current_out_edge
 
             # add task for changed edges each layer, add the new message after the message is updated
             for src, dest in inserted_edges :
-                task_q_bkp.push_task('add', src, dest, intm_initial[f"layer{it_layer + 1}"]['before'][src])
+                task_q_bkp.push_task('add', dest, intm_initial[f"layer{it_layer + 1}"]['before'][src])
 
 
             # update the task queue
@@ -168,7 +168,8 @@ def incremental_inference(model, inititial_out_edge_dict: dict, current_out_edge
 def batch_incremental_inference(model, data, folder:str, verify:bool = False, data_it:int=0) :
     verification_tolerance = 1e-05
     t_distribution = []
-    nlayers = len(list(model.children()))
+    # nlayers = len(list(model.children()))
+    nlayers = count_layers(model)
     condition_distribution = defaultdict(list)
     entries = os.listdir(folder)
     data_folders = [entry for entry in entries if entry.isdigit() and os.path.isdir(os.path.join(folder, entry))]
@@ -205,7 +206,7 @@ def batch_incremental_inference(model, data, folder:str, verify:bool = False, da
 
             data2 = Data(x=data.x, edge_index=initial_edges).to(device)
             loader = data_loader(data2, num_layers=nlayers, num_neighbour_per_layer=-1, separate=False,
-                                 input_nodes=last_layer_fetched_nodes, persistent_workers=False)
+                                 input_nodes=last_layer_fetched_nodes)
             intm_initial_raw = inference_for_intermediate_result(model, loader)
             # rename the keys for alignment
             intm_initial = {

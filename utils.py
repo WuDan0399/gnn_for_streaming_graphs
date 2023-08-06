@@ -24,8 +24,8 @@ np.random.seed(0)
 torch.manual_seed(0)
 torch.set_printoptions(precision=10)
 
-root = os.getenv("DYNAMIC_GNN_ROOT")
-# root = "/home/dan/wooden/GNN/"
+# root = os.getenv("DYNAMIC_GNN_ROOT")
+root = "/home/dan/wooden/GNN/"
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class bcolors:
@@ -60,10 +60,7 @@ class FakeArgs :
 
 
 class EgoNetDataLoader(DataLoader):
-    def __init__(self, data, node_indices, batch_size, k=5, num_workers=0, persistent_workers=False):
-        if data.device != torch.device('cpu'):
-            print("Check the code, data should be on cpu before calling EgoNetDataLoader.__init__. Otherwise, could fail to initialize CUDA.")
-        
+    def __init__(self, data, node_indices, batch_size, k=5, num_workers=0, persistent_workers=False): 
         self.data = data
         self.node_indices = node_indices
         self.batch_size = batch_size
