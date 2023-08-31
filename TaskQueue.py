@@ -4,9 +4,8 @@ import torch
 from collections import defaultdict
 
 class Task:
-    def __init__(self, op, src, dst, msg_idx):
+    def __init__(self, op, dst, msg_idx):
         self.op = op
-        self.src = src
         self.dst = dst
         self.msg_idx = msg_idx
 
@@ -16,9 +15,9 @@ class TaskQueue:
         self.task_buffer = []
         self.message_buffer = []
 
-    def push_task(self, op, src, dst, msg):
+    def push_task(self, op, dst, msg):
         msg_idx = self.push_message(msg)
-        self.task_buffer.append(Task(op, src, dst, msg_idx))
+        self.task_buffer.append(Task(op,  dst, msg_idx))
 
 
     def push_message(self, message: torch.Tensor):

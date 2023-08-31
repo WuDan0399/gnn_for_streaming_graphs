@@ -9,60 +9,34 @@ import random
 
 from tqdm import tqdm
 from utils import *
-from GCN import GCN
-from torch_geometric.data import Data
-
-# todo: 改成 {batch_size}_{id} directory里面存 edge_list before and after, timing_result before and after.
-# 对于一个 directory 如果里面已经有了 ground truth files， skip for full graph inference.
 
 @torch.no_grad()
-def inference_for_intermediate_result(model, loader, save_dir:str = "", postfix: str = "") :
+def inference_for_intermediate_result(model, loader, folder:str = "", postfix: str = "") :
     model.eval()
     print("Using Neighbour Loader for Full Graph Inference")
     intermediate_result_each_layer = defaultdict(lambda: defaultdict(lambda: torch.empty((0))))
+    for batch in tqdm(loader):
+        batch = batch.to(device, 'edge_index')
+        batch_size = batch.batch_size
+        _, batch_result_each_layer, batch_intermediate_result_per_layer = model(batch.x, batch.edge_index)
 
-    # save out_per_layer and intermediate timing_result per layer
-    if isinstance(loader, pyg.loader.neighbor_loader.NeighborLoader):
-        for batch in tqdm(loader):
-            batch = batch.to(device, 'edge_index')
-            batch_size = batch.batch_size
-            _, _, batch_intermediate_result_per_layer = model(batch.x, batch.edge_index)
-            # change sage.py and gcn.py to only return the information of target nodes in batch
-            for layer in batch_intermediate_result_per_layer :
-                if len(intermediate_result_each_layer[layer]['a-']) != 0:
-                    intermediate_result_each_layer[layer]['a-'] = torch.concat((intermediate_result_each_layer[layer]["a-"],
-                                                        batch_intermediate_result_per_layer[layer]["a-"][:batch_size].cpu()))
-                else:
-                    intermediate_result_each_layer[layer]['a-'] = batch_intermediate_result_per_layer[layer]["a-"][:batch_size].cpu()
+        for layer in batch_intermediate_result_per_layer :
+            if len(intermediate_result_each_layer[layer]['a-']) != 0:
+                intermediate_result_each_layer[layer]['a-'] = torch.concat((intermediate_result_each_layer[layer]["a-"],
+                                                     batch_intermediate_result_per_layer[layer]["a-"][:batch_size].cpu()))
+            else:
+                intermediate_result_each_layer[layer]['a-'] = batch_intermediate_result_per_layer[layer]["a-"][:batch_size].cpu()
 
-                if len(intermediate_result_each_layer[layer]['a']) != 0:
-                    intermediate_result_each_layer[layer]['a'] = torch.concat((intermediate_result_each_layer[layer]["a"],
-                                                        batch_intermediate_result_per_layer[layer]["a"][:batch_size].cpu()))
-                else:
-                    intermediate_result_each_layer[layer]['a'] = batch_intermediate_result_per_layer[layer]["a"][:batch_size].cpu()
-
-    elif isinstance(loader, EgoNetDataLoader):
-        for batch in tqdm(loader):
-            batch = batch.to(device)
-            _, _, batch_intermediate_result_per_layer = model(batch.x, batch.edge_index, batch.batch, batch.ptr)
-            for layer in batch_intermediate_result_per_layer :
-                if len(intermediate_result_each_layer[layer]['a-']) != 0:
-                    intermediate_result_each_layer[layer]['a-'] = torch.concat((intermediate_result_each_layer[layer]["a-"],
-                                                        batch_intermediate_result_per_layer[layer]["a-"].cpu()))
-                else:
-                    intermediate_result_each_layer[layer]['a-'] = batch_intermediate_result_per_layer[layer]["a-"].cpu()
-
-                if len(intermediate_result_each_layer[layer]['a']) != 0:
-                    intermediate_result_each_layer[layer]['a'] = torch.concat((intermediate_result_each_layer[layer]["a"],
-                                                        batch_intermediate_result_per_layer[layer]["a"].cpu()))
-                else:
-                    intermediate_result_each_layer[layer]['a'] = batch_intermediate_result_per_layer[layer]["a"].cpu()
-
-    if save_dir != "":
+            if len(intermediate_result_each_layer[layer]['a']) != 0:
+                intermediate_result_each_layer[layer]['a'] = torch.concat((intermediate_result_each_layer[layer]["a"],
+                                                     batch_intermediate_result_per_layer[layer]["a"][:batch_size].cpu()))
+            else:
+                intermediate_result_each_layer[layer]['a'] = batch_intermediate_result_per_layer[layer]["a"][:batch_size].cpu()
+    if folder != "":
         for layer in intermediate_result_each_layer:
-            create_directory(osp.join(save_dir, layer))
-            torch.save(intermediate_result_each_layer[layer]['a-'], osp.join(save_dir, layer, f"before_aggregation{postfix}.pt"))
-            torch.save(intermediate_result_each_layer[layer]['a'], osp.join(save_dir, layer, f"after_aggregation{postfix}.pt"))
+            create_directory(osp.join(folder, layer))
+            torch.save(intermediate_result_each_layer[layer]['a-'], osp.join(folder, layer, f"before_aggregation{postfix}.pt"))
+            torch.save(intermediate_result_each_layer[layer]['a'], osp.join(folder, layer, f"after_aggregation{postfix}.pt"))
 
     return intermediate_result_each_layer
 
@@ -84,9 +58,6 @@ def main():
     else :
         batch_size = int(args.perbatch)
     print(f"Batch size for streaming graph: {batch_size}")
-
-    # model = GCN(dataset.num_features, args.hidden_channels, dataset.num_classes, args)
-    # model = load_available_model(model, args).to(device)
 
     for i in tqdm(range(niters)):
         out_folder = osp.join("examples", "intermediate", args.dataset, args.aggr, args.stream, f"batch_size_{batch_size}", str(i))

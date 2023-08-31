@@ -1,17 +1,17 @@
-from ignite import ignite
+from inkstream import inkstream
 from utils import *
 from GIN import GIN
 from EventQueue import *
 
 
-class ignite_gin(ignite):
+class inkstream_gin(inkstream):
     def user_apply(self, events: dict, base_value: torch.Tensor, intm_initial: dict = None, it_layer: int = 0, node: int = -1):
 
         if "user" not in events.keys():  # left side (aggregated value) changes, right side (h_u) remains the same
-            right_side = intm_initial[f"layer{it_layer+1}"]['before'][node]
+            right_side = intm_initial[f"layer{it_layer+1}"]['before'][node].to(device)
         else:
             assert (len(events["user"]) == 1)
-            right_side = events['user'][0]
+            right_side = events['user'][0].to(device)
         return base_value + right_side
 
     def user_reducer(self, messages: list):
@@ -37,8 +37,8 @@ class ignite_gin(ignite):
 
 
 def main():
-    # args = FakeArgs(dataset="cora", aggr="min", perbatch=1,
-    #                 stream="add", model="GIN", binary=True, save_int=True, it=1)
+    # args = FakeArgs(dataset="cora", aggr="max", perbatch=1,
+    #                 stream="add", model="GIN", binary=True, save_int=True)
     parser = argparse.ArgumentParser()
     args = general_parser(parser)
     dataset = load_dataset(args)
@@ -55,20 +55,20 @@ def main():
     intr_result_dir = osp.join("examples", "intermediate", args.dataset, "min", args.stream,
                                f"batch_size_{batch_size}")
 
-    starter = ignite_gin(model, "model_configs/GIN.txt",
-                         intr_result_dir, ego_net=True)
+    starter = inkstream_gin(model, "model_configs/GIN.txt",
+                            intr_result_dir, aggregator="max", ego_net=True)
 
-    condition_distribution, exec_time_dist = starter.batch_incremental_inference(data, data_it=args.it)
+    condition_distribution, exec_time_dist = starter.batch_incremental_inference(data)
 
     conditions_dir = osp.join("examples", "condition_distribution", "GIN")
     create_directory(conditions_dir)
     for it_layer in condition_distribution.keys():
         np.save(osp.join(conditions_dir,
-                         f"[tot_add_delno_cov_rec]{args.dataset}_{args.stream}_{batch_size}_layer{it_layer}_{args.it}.npy"),
+                         f"[tot_add_delno_cov_rec]GIN_{args.dataset}_{args.stream}_{batch_size}_layer{it_layer}.npy"),
                 condition_distribution[it_layer])
     time_dir = osp.join("examples", "timing_result", "incremental")
     create_directory(time_dir)
-    np.save(osp.join(time_dir, "_".join(intr_result_dir.split(
+    np.save(osp.join(time_dir, "GIN_"+"_".join(intr_result_dir.split(
         "/")[2:]) + f"_{args.it}.npy"), exec_time_dist)
 
 

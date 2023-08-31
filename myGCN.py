@@ -5,6 +5,7 @@ import torch
 from tqdm import tqdm
 from GCN import GCN
 from EventQueue import *
+from TaskQueue import *
 from utils import *
 from torch_geometric.data import Data
 from get_intermediate_result import inference_for_intermediate_result
@@ -30,6 +31,7 @@ def incremental_inference(model, inititial_out_edge_dict: dict, current_out_edge
     Problems:
     1. very result after lin(x) could be slightly different in two versions.
     """
+    memory_access_mine = 0
     model.eval()
     model_config_path = "model_configs/GCN.txt"
     with open(model_config_path, 'r') as f:
@@ -48,21 +50,21 @@ def incremental_inference(model, inititial_out_edge_dict: dict, current_out_edge
     for src, dest in removed_edges:
         task_q.push_task('delete', dest, intm_initial["layer1"]['before'][src])
 
+    memory_access_mine += (len(inserted_edges) +len(removed_edges))*len(intm_initial["layer1"]['before'][inserted_edges[0][0]])
+
     # message value after the corresponding message is consumed,e.g., after all messages in this layer is consumed.
     task_dict = task_q.reduce("min")
 
     nlayer = 2
-    # cnt_computed, cnt_add_only, cnt_recomp, cnt_covered, cnt_delnochange = defaultdict(int), 0, 0, 0, 0  # 统计每个branch被访问的次数
+
     cnt_dict = defaultdict(lambda: defaultdict(int))
     for it_layer in range(1, nlayer+1):  # todo: decide number of layers by model or intermediate value
         out = dict()  # changed input for next layer or model output for all changed nodes
 
-        # todo: 维护propagated_nodes和直接重复Propagation 哪个更省时？
-        # propagated_nodes = set()  # maintain the set of nodes that has been propagated to avoid double propagation for changed edges
-
         for destination in task_dict:
             cnt_dict[it_layer]["computed"] = cnt_dict[it_layer]["computed"] + 1
             aggred_dst = intm_initial[f"layer{it_layer}"]['after'][destination]  # old aggregated timing_result
+            memory_access_mine += len(aggred_dst)
             aggregated_new_message = task_dict[destination]["add"]
             if "delete" not in task_dict[destination]:
                 # add-only, aggregated_new_message cannot be []
@@ -75,7 +77,7 @@ def incremental_inference(model, inititial_out_edge_dict: dict, current_out_edge
                 delete_mask = aggred_dst == aggregated_old_message
                 if torch.sum(delete_mask) != 0 :
                     if aggregated_new_message==[]:
-                        # delete-only, aggregated_new_message is [], 有old values dominates的值， 无法恢复，重新计算
+                        # delete-only, aggregated_new_message is [], recompute
                         # print(f"recomputed {destination}")
                         cnt_dict[it_layer]["recompute"] = cnt_dict[it_layer]["recompute"] + 1
                         neighbours = current_in_edge_dict[destination]  #
@@ -85,6 +87,8 @@ def incremental_inference(model, inititial_out_edge_dict: dict, current_out_edge
                             else :
                                 message_list = get_stacked_tensors_from_dict(intm_initial[f"layer{it_layer}"]['before'],
                                                                              neighbours)
+                                for m in message_list:
+                                    memory_access_mine += len(m)
                             changed_aggred_dst = torch.min(message_list, dim=0).values
                         else :
                             changed_aggred_dst = torch.zeros(aggred_dst.shape) # if no message, get 0s
@@ -95,7 +99,6 @@ def incremental_inference(model, inititial_out_edge_dict: dict, current_out_edge
                             (aggregated_new_message[delete_mask], aggregated_old_message[delete_mask]))
                         aggregated_new_old_message = torch.min(masked_new_old_message, dim=0)
                         if torch.sum(aggregated_new_old_message.indices) != 0 :
-                            # 有old values dominates的值， 无法恢复，重新计算
                             # print(f"recomputed {destination}")
                             cnt_dict[it_layer]["recompute"] = cnt_dict[it_layer]["recompute"] + 1
                             neighbours = current_in_edge_dict[destination]
@@ -104,6 +107,8 @@ def incremental_inference(model, inititial_out_edge_dict: dict, current_out_edge
                             else:
                                 message_list = get_stacked_tensors_from_dict(intm_initial[f"layer{it_layer}"]['before'],
                                                                              neighbours)
+                                for m in message_list:
+                                    memory_access_mine += len(m)
                             changed_aggred_dst = torch.min(message_list, dim=0).values
                             comp_inter_layer_and_propagate = True
                         else :
@@ -113,7 +118,6 @@ def incremental_inference(model, inititial_out_edge_dict: dict, current_out_edge
                             comp_inter_layer_and_propagate = True
 
                 else :
-                    # 只要验证delete了，就算一次，不管最后有没有加。
                     cnt_dict[it_layer]["del_no_change"] = cnt_dict[it_layer]["del_no_change"] + 1
                     if not aggregated_new_message==[]:
                         # print(f"[no change for delete] incremental compute {destination}")
@@ -133,6 +137,7 @@ def incremental_inference(model, inititial_out_edge_dict: dict, current_out_edge
                     task_q_bkp.bulky_push(inititial_out_edge_dict[destination], current_out_edge_dict[destination],
                                           intm_initial[f"layer{it_layer + 1}"]['before'][destination],
                                           next_layer_before_aggregation)
+                    memory_access_mine += len(intm_initial[f"layer{it_layer + 1}"]['before'][destination])
                     # propagated_nodes.add(destination)
                 out[destination] = next_layer_before_aggregation # either input of next layer, or output of whole model
 
@@ -147,6 +152,7 @@ def incremental_inference(model, inititial_out_edge_dict: dict, current_out_edge
             # add task for removed edges each layer, delete the old message before the message changes
             for src, dest in removed_edges :
                 task_q_bkp.push_task('delete', dest, intm_initial[f"layer{it_layer + 1}"]['before'][src])
+                memory_access_mine += len(intm_initial[f"layer{it_layer + 1}"]['before'][src])
 
             # update the next layer input
             for node in out:
@@ -155,13 +161,15 @@ def incremental_inference(model, inititial_out_edge_dict: dict, current_out_edge
             # add task for changed edges each layer, add the new message after the message is updated
             for src, dest in inserted_edges :
                 task_q_bkp.push_task('add', dest, intm_initial[f"layer{it_layer + 1}"]['before'][src])
+                memory_access_mine += len(intm_initial[f"layer{it_layer + 1}"]['before'][src])
 
 
             # update the task queue
             task_q = task_q_bkp
             task_q_bkp = TaskQueue()
             task_dict = task_q.reduce('min')
-
+    
+    print(f"Memory Accessed in my method: {memory_access_mine*4/1024} KB")
     end = time.perf_counter()
     return cnt_dict, end-start
 
@@ -175,7 +183,7 @@ def batch_incremental_inference(model, data, folder:str, verify:bool = False, da
     data_folders = [entry for entry in entries if entry.isdigit() and os.path.isdir(os.path.join(folder, entry))]
 
     # Multiple different data (initial state info and final state info) directory
-    for data_dir in tqdm(data_folders[data_it*100: (data_it+1)*100]):
+    for data_dir in tqdm(data_folders[:5]):
         # print(osp.join(folder, data_dir))
         initial_edges = torch.load(osp.join(folder, data_dir, "initial_edges.pt"))
         final_edges = torch.load(osp.join(folder, data_dir, "final_edges.pt"))
@@ -193,6 +201,15 @@ def batch_incremental_inference(model, data, folder:str, verify:bool = False, da
 
         # get Initial Result: either load from file, or run with full model inference.
         intm_initial = load_tensors_to_dict(osp.join(folder, data_dir), skip=7, postfix="_initial.pt")
+        direct_affected_nodes = set([dst for _, dst in inserted_edges + removed_edges])
+        fetched_nodes = affected_nodes_each_layer([init_out_edge_dict, init_in_edge_dict, final_out_edge_dict, final_in_edge_dict],
+                                                    direct_affected_nodes, depth=nlayers)
+        # last_layer_fetched_nodes = torch.LongTensor(list(fetched_nodes[nlayers].union(src_nodes)))
+        last_layer_fetched_nodes = torch.LongTensor(list(fetched_nodes[nlayers]))
+        print(last_layer_fetched_nodes)
+        memory_access_baseline = len(fetched_nodes) * data.x.shape[1] * 4 / 1024  # in KB
+        print(f"Memory Accessed in baseline: {memory_access_baseline} KB")
+        
         if intm_initial == {} :
             # todo: change to affected part inference to save time for evaluation
             print("Running Inference for Theoretical Affected Area to Get Initial Result")

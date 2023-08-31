@@ -14,7 +14,7 @@ class EventQueue:
     def __init__(self):
         self.event_buffer_monotonic = []
         self.event_buffer_accumulative = []
-        self.event_buffer_user = []  # todo, implement for user-defined events
+        self.event_buffer_user = []
         self.message_buffer = []
 
 

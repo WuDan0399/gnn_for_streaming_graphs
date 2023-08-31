@@ -14,7 +14,7 @@ def inference_with_intermediate_value(model, data: Union[pyg.data.Data, pyg.load
 
     elif isinstance(data, pyg.loader.NeighborLoader):
         # print("Using Neighbour Loader")
-        # inference batches with loader. 不然会因为batch sampling的randomness导致不匹配。
+        # inference batches with loader. otherwise the sampling in batch constitution will lead to different result.
         result_each_layer = {}
         for batch in data:
             batch = batch.to(device, 'edge_index')
@@ -22,7 +22,7 @@ def inference_with_intermediate_value(model, data: Union[pyg.data.Data, pyg.load
             _, batch_result_each_layer, _ = model(batch.x, batch.edge_index)
 
             for layer in batch_result_each_layer:
-                # 把batch_result_each_layer 按照batch.input_id  concate在一起。
+                # concatenate batch_result_each_layer according to batch.input_id
                 if layer not in result_each_layer :
                     result_each_layer[layer] = batch_result_each_layer[layer][:batch_size].cpu()
                 else:
@@ -99,14 +99,14 @@ def main():
             data2 = Data(x=data.x, edge_index=initial_edges)
             data2.to(device)
             loader = data_loader(data2, num_layers=nlayer, num_neighbour_per_layer=-1, separate=False,
-                                 input_nodes=last_layer_affected_nodes, persistent_workers=False)
+                                 input_nodes=last_layer_affected_nodes)
             init_inter_result = inference_with_intermediate_value(model, loader)
 
             # inference for final graph
             data3 = Data(x=data.x, edge_index=final_edges)
             data3.to(device)
             loader2 = data_loader(data3, num_layers=nlayer, num_neighbour_per_layer=-1, separate=False,
-                                  input_nodes=last_layer_affected_nodes, persistent_workers=False)
+                                  input_nodes=last_layer_affected_nodes)
             final_inter_result = inference_with_intermediate_value(model, loader2)
 
             # compare the hidden state in each layer. use is_close function.
