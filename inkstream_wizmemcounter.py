@@ -8,7 +8,7 @@ from utils import *
 from torch_geometric.data import Data
 from get_intermediate_result import inference_for_intermediate_result
 
-import multiprocessing as mp
+import multiprocessing
 
 class ignite:
 
@@ -91,13 +91,7 @@ class ignite:
                 else:
                     event_q.push_accumulative_event('update', dest, message_list[src])
 
-    
-    # multiprocessing wrapper
-    def incremental_layer_wrapper(self, args):
-        return self.incremental_layer(*args)
-    
-
-    def incremental_aggregation(self, events, it_layer, destination, current_in_edge_dict, intm_initial) \
+    def incremental_aggregation(self, cnt_dict, events, it_layer, destination, current_in_edge_dict, intm_initial) \
             -> Tuple[bool, torch.Tensor]:
         """
         :param cnt_dict: dict for counting the number of each type of incremental aggregation
@@ -110,15 +104,17 @@ class ignite:
         """
         if "remove" not in events and "insert" not in events:  # activated by user-defined events, but not aggregation
             return False, None
-        
+        meory_accessed = 0 
+        cnt_dict[it_layer]["computed"] = cnt_dict[it_layer]["computed"] + 1
         # old aggregated timing_result
         aggred_dst = intm_initial[f"layer{it_layer}"]['after'][destination]
+
+        meory_accessed+=len(aggred_dst)
+
         aggregated_new_message = events["insert"]
-        # conditions，do not change the order in return value!
-        add_only, del_no_change, covered, recompute = False, False, False, False 
         if "remove" not in events:
             # add-only, aggregated_new_message cannot be []
-            add_only = True
+            cnt_dict[it_layer]["add_only"] = cnt_dict[it_layer]["add_only"] + 1
             changed_aggred_dst = self.inc_aggregator_pair(aggred_dst, aggregated_new_message)
             changed = True if not torch.all(changed_aggred_dst == aggred_dst) else False
 
@@ -127,15 +123,18 @@ class ignite:
             remove_mask = aggred_dst == aggregated_old_message
             if torch.sum(remove_mask) != 0:
                 if aggregated_new_message == []:
-                    # remove-only, aggregated_new_message is [], 有old values dominates的值， 无法恢复，重新计算
+                    # remove-only, aggregated_new_message is [], cannot recover, recompute
                     # print(f"recomputed {destination}")
-                    recompute = True
+                    cnt_dict[it_layer]["recompute"] = cnt_dict[it_layer]["recompute"] + 1
                     neighbours = current_in_edge_dict[destination]  #
                     if neighbours != []:
                         if type(intm_initial[f"layer{it_layer}"]['before']) == torch.Tensor:
                             message_list = intm_initial[f"layer{it_layer}"]['before'][neighbours]
+                            meory_accessed+=len(message_list)
                         else:
                             message_list = get_stacked_tensors_from_dict(intm_initial[f"layer{it_layer}"]['before'], neighbours)
+                            for m in message_list:
+                                meory_accessed += len(m)
                         changed_aggred_dst = self.inc_aggregator(message_list).values
                     else:
                         changed_aggred_dst = torch.zeros(aggred_dst.shape)  # if no message, get 0s
@@ -144,11 +143,10 @@ class ignite:
                 else:
                     masked_new_old_message = torch.stack((aggregated_new_message[remove_mask], aggregated_old_message[remove_mask]))
                     aggregated_new_old_message = self.inc_aggregator(masked_new_old_message)
-                    print(aggregated_new_old_message)
                     if torch.sum(aggregated_new_old_message.indices) != 0:
-                        # 有old values dominates的值， 无法恢复，重新计算
+                        # old values dominates, cannot recover, recompute
                         # print(f"recomputed {destination}")
-                        recompute = True
+                        cnt_dict[it_layer]["recompute"] = cnt_dict[it_layer]["recompute"] + 1
                         neighbours = current_in_edge_dict[destination]
                         if type(intm_initial[f"layer{it_layer}"]['before']) == torch.Tensor:
                             message_list = intm_initial[f"layer{it_layer}"]['before'][neighbours]
@@ -156,17 +154,19 @@ class ignite:
                             message_list = get_stacked_tensors_from_dict(
                                 intm_initial[f"layer{it_layer}"]['before'],
                                 neighbours)
+                            for m in message_list:
+                                meory_accessed+=len(m)
                         changed_aggred_dst = self.inc_aggregator(message_list).values
                         changed = True
                     else:
                         # print(f"[covered] incremental compute {destination}")
-                        covered = True
+                        cnt_dict[it_layer]["covered"] = cnt_dict[it_layer]["covered"] + 1
                         changed_aggred_dst = self.inc_aggregator_pair(aggred_dst, aggregated_new_message)
                         changed = True
 
             else:
-                # 只要验证remove了，就算一次，不管最后有没有加。
-                del_no_change = True
+                # count as "computed" no matter changed or not
+                cnt_dict[it_layer]["del_no_change"] = cnt_dict[it_layer]["del_no_change"] + 1
                 if not aggregated_new_message == []:
                     # print(f"[no change for remove] incremental compute {destination}")
                     changed_aggred_dst = self.inc_aggregator_pair(aggred_dst, aggregated_new_message)
@@ -176,49 +176,13 @@ class ignite:
                     changed = False
                     changed_aggred_dst = None
 
-        return changed, changed_aggred_dst, [add_only, del_no_change, covered, recompute]
+        return changed, changed_aggred_dst, meory_accessed
 
-    
-    @torch.no_grad()
-    def incremental_layer(self, operations_in_layer, it_layer, destination, current_in_edge_dict, intm_initial):
-        aggr_changed, changed_aggred_dst, cnd_dist = self.incremental_aggregation(self.event_dict[destination],
-                                                                                it_layer+1,
-                                                                                destination, current_in_edge_dict,
-                                                                                intm_initial)
-
-        if not aggr_changed and "user" not in self.event_dict[destination]:
-            print("no change, propagation stops")
-            return False, False, None, None, cnd_dist
-        else:
-            if not aggr_changed:
-                # print("no change for aggregation, but propagation continues due to user-defined events")
-                changed_aggred_dst = intm_initial[f"layer{it_layer+1}"]['after'][destination]
-            else:
-                changed_aggred_dst_copy = changed_aggred_dst.clone()
-
-            next_layer_before_aggregation = changed_aggred_dst.unsqueeze(0).to(device)
-            # start of dense computation, transfer to device for event propagation.
-            # transform to 2d like a batch of 1, for betch-wise operations.
-            for model_operation in operations_in_layer[1:]:
-                # For the rest operations, check whether there is user-defined operation.
-                # If so, split by user-defined func, to avoid frequent and unnecessary data transfer.
-                if model_operation == "user_apply":
-                    next_layer_before_aggregation = next_layer_before_aggregation.squeeze()
-                    next_layer_before_aggregation = self.user_apply(self.event_dict[destination],
-                                                                    next_layer_before_aggregation, intm_initial, it_layer, destination)
-                    next_layer_before_aggregation = next_layer_before_aggregation.unsqueeze(0)
-                else:
-                    next_layer_before_aggregation = self.transformation(model_operation, next_layer_before_aggregation)
-            # end of dense computation, transfer back to cpu for event propagation.
-            next_layer_before_aggregation = next_layer_before_aggregation.squeeze().to('cpu')
-            
-            return True, aggr_changed, next_layer_before_aggregation, changed_aggred_dst_copy, cnd_dist
-
-    
     @torch.no_grad()
     def incremental_inference(self, inititial_out_edge_dict: dict, current_out_edge_dict: dict,
                               current_in_edge_dict: dict,
                               intm_initial: dict, inserted_edges: list, removed_edges: list):
+        memory_access_mine = 0
         self.model.eval()
         event_q, event_q_bkp = EventQueue(), EventQueue()
 
@@ -226,52 +190,67 @@ class ignite:
 
         # Initial Events
         self.create_events_for_changed_edges(event_q, inserted_edges, removed_edges, intm_initial["layer1"]['before'])
+        memory_access_mine += (len(inserted_edges) +len(removed_edges))*len(intm_initial["layer1"]['before'][inserted_edges[0][0]])
 
         # message value after the corresponding message is consumed,e.g., after all messages in this layer is consumed.
         self.event_dict = event_q.reduce(
             self.monotonic_aggregator, self.accumulative_aggregator, self.user_reducer)
 
-        # cnt_computed, cnt_add_only, cnt_recomp, cnt_covered, cnt_delnochange = defaultdict(int), 0, 0, 0, 0  # 统计每个branch被访问的次数
+        # cnt_computed, cnt_add_only, cnt_recomp, cnt_covered, cnt_delnochange = defaultdict(int), 0, 0, 0, 0  #count times of each branch
         cnt_dict = defaultdict(lambda: defaultdict(int))
+        # todo: parse the model configuration file by 'min' and 'max, then execute operations between every two aggr, skip the very first one.
         layerwise_operations = partition_by_aggregation_phase(model_configs=self.model_config, aggr=self.aggregator)
-        
-        # create pool of processes
-        # pool = mp.Pool(mp.cpu_count())
-        num_process = 16 if mp.cpu_count() > 20 else 4
-        pool = mp.Pool(num_process)
-
         # iterate through model layers
         for it_layer, operations_per_layer in enumerate(layerwise_operations):
             out = dict()  # changed input for next layer or model output for all changed nodes
 
-            # process each affected node in parallel in a layer
-            # create list of arguments for parallel execution
-            args = [(operations_per_layer, it_layer, destination, current_in_edge_dict, intm_initial) for destination in self.event_dict]
-            
-            cnt_dict[it_layer+1]["computed"] = cnt_dict[it_layer]["computed"] + len(self.event_dict)
-            
-            results = pool.map(self.incremental_layer_wrapper, args)
-            
-            # multiprocess reduce: update the result back to intm_initial and event_q_bkp 
-            for (destination, (do_propagate, aggr_changed, next_layer_before_aggregation, changed_aggred_dst_copy, cond_dist)) in zip(self.event_dict, results):
+            for destination in self.event_dict:  # process each affected node in a layer
+                #TODO: parallize this loop
+                # operations_per_layer must start with aggregation phase.
+                aggr_changed, changed_aggred_dst, memory_accessed = self.incremental_aggregation(cnt_dict,
+                                                                                self.event_dict[destination],
+                                                                                it_layer+1,
+                                                                                destination, current_in_edge_dict,
+                                                                                intm_initial)
+                memory_access_mine += memory_accessed
                 
-                if cond_dist is not None:
-                    for it_cond in range(4):
-                        if cond_dist[it_cond]:
-                            cnt_dict[it_layer+1][condition_keys[it_cond]] += 1
-                
-                if do_propagate:    
-                    # move to reduce process after parallel processing is done
-                    if aggr_changed:
+                if not aggr_changed and "user" not in self.event_dict[destination]:
+                    # print("no change, propagation stops")
+                    continue
+                else:
+                    if not aggr_changed:
+                        # print("no change for aggregation, but propagation continues due to user-defined events")
+                        changed_aggred_dst = intm_initial[f"layer{it_layer+1}"]['after'][destination]
+                        memory_access_mine += len(changed_aggred_dst)
+                        
+                    else:
                         # print("change for aggregation, propagation continues")
-                        intm_initial[f"layer{it_layer+1}"]['after'][destination] = changed_aggred_dst_copy
-                    
+                        intm_initial[f"layer{it_layer+1}"]['after'][destination] = changed_aggred_dst
+
+                    next_layer_before_aggregation = changed_aggred_dst.unsqueeze(0).to(device)
+                    # start of dense computation, transfer to device for event propagation.
+                    # transform to 2d like a batch of 1, for betch-wise operations.
+                    for model_operation in operations_per_layer[1:]:
+                        # For the rest operations, check whether there is user-defined operation.
+                        # If so, split by user-defined func, to avoid frequent and unnecessary data transfer.
+                        if model_operation == "user_apply":
+                            next_layer_before_aggregation = next_layer_before_aggregation.squeeze()
+                            next_layer_before_aggregation = self.user_apply(self.event_dict[destination],
+                                                                            next_layer_before_aggregation, intm_initial, it_layer, destination)
+                            memory_access_mine += len(next_layer_before_aggregation)
+                            next_layer_before_aggregation = next_layer_before_aggregation.unsqueeze(0)
+                        else:
+                            next_layer_before_aggregation = self.transformation(model_operation, next_layer_before_aggregation)
+                    # end of dense computation, transfer back to cpu for event propagation.
+                    next_layer_before_aggregation = next_layer_before_aggregation.squeeze().to('cpu')
+
                     # update queue for event type 1, if the new value need to be propagated to next layer.
                     if it_layer+1 < self.nlayer:
                         event_q_bkp.bulky_push(inititial_out_edge_dict[destination],
                                                current_out_edge_dict[destination],
                                                intm_initial[f"layer{it_layer + 2}"]['before'][destination],
                                                next_layer_before_aggregation)
+                        memory_access_mine += len(intm_initial[f"layer{it_layer + 2}"]['before'][destination])
 
                     # update the next layer input
                     out[destination] = next_layer_before_aggregation
@@ -294,8 +273,8 @@ class ignite:
                 event_q_bkp = EventQueue()
                 self.event_dict = event_q.reduce(self.monotonic_aggregator, self.accumulative_aggregator, self.user_reducer)
 
-        pool.close()
         end = time.perf_counter()
+        print(f"Memory Accessed in my method: {memory_access_mine*4/1024} KB")
         return cnt_dict, end - start
 
     def batch_incremental_inference(self, data, data_it: int = 0):
@@ -306,11 +285,12 @@ class ignite:
                         entry.isdigit() and os.path.isdir(os.path.join(self.folder, entry))]
 
         # Multiple different data (initial state info and final state info) directory
-        niters=min(500, len(data_folders))
+        niters=min(5, len(data_folders))
         print(f"affetced area inference niters: {niters}")
         for data_dir in tqdm(data_folders[:niters]):
         # for data_dir in tqdm(data_folders[data_it * 100: (data_it + 1) * 100]):
             # print(osp.join(self.folder, data_dir))
+
             initial_edges = torch.load(osp.join(self.folder, data_dir, "initial_edges.pt"))
             final_edges = torch.load(osp.join(self.folder, data_dir, "final_edges.pt"))
             inserted_edges, removed_edges = [], []
@@ -328,6 +308,7 @@ class ignite:
             # get Initial Result: either load from file, or run with full model inference.
             intm_initial = load_tensors_to_dict(
                 osp.join(self.folder, data_dir), skip=7, postfix="_initial.pt")
+            memory_access_baseline = 0
             if intm_initial == {}:
                 # get neighbourhood information for all theoretical affected nodes, and the srcs, in case of recompute.
                 print("Running Inference for Theoretical Affected Area to Get Initial Result")
@@ -337,17 +318,21 @@ class ignite:
                     [init_out_edge_dict, init_in_edge_dict,final_out_edge_dict, final_in_edge_dict],
                     direct_affected_nodes, depth=self.nlayer)
                 self.fetched_nodes = torch.LongTensor(list(total_fetched_nodes[self.nlayer]))
+                memory_access_baseline = len(self.fetched_nodes) * data.x.shape[1] * 4 / 1024  # in KB
+                print(f"Memory Accessed in baseline: {memory_access_baseline} KB")
 
                 data2 = data.clone()
                 data2.edge_index = initial_edges
                 data2.to(device)
                 # data2 = Data(x=data.x, edge_index=initial_edges).to(device)
-                if not self.ego_net:
-                    loader = data_loader(data2, num_layers=self.nlayer, num_neighbour_per_layer=-1, separate=False,
+                # if not self.ego_net:
+                #     loader = data_loader(data2, num_layers=self.nlayer, num_neighbour_per_layer=-1, separate=False,
+                #                          input_nodes=self.fetched_nodes)
+                # else:
+                #     batch_size = 8 if multiprocessing.cpu_count() < 10 else 64
+                #     loader = EgoNetDataLoader(data2, self.fetched_nodes, batch_size=batch_size)
+                loader = data_loader(data2, num_layers=self.nlayer, num_neighbour_per_layer=-1, separate=False,
                                          input_nodes=self.fetched_nodes)
-                else:
-                    batch_size = 8 if mp.cpu_count() < 10 else 64
-                    loader = EgoNetDataLoader(data2, self.fetched_nodes, batch_size=batch_size)
                 intm_initial_raw = inference_for_intermediate_result(self.model, loader)
                 # rename the keys for alignment
                 intm_initial = {
@@ -388,12 +373,14 @@ class ignite:
             data3 = data.clone()
             data3.edge_index = final_edges
             data3.to(device)
-            if not self.ego_net:
-                loader = data_loader(data3, num_layers=self.nlayer, num_neighbour_per_layer=-1, separate=False,
+            # if not self.ego_net:
+            #     loader = data_loader(data3, num_layers=self.nlayer, num_neighbour_per_layer=-1, separate=False,
+            #                      input_nodes=self.fetched_nodes)
+            # else:
+            #     batch_size = 8 if multiprocessing.cpu_count() < 10 else 64
+            #     loader = EgoNetDataLoader(data3, self.fetched_nodes, batch_size=batch_size)
+            loader = data_loader(data3, num_layers=self.nlayer, num_neighbour_per_layer=-1, separate=False,
                                  input_nodes=self.fetched_nodes)
-            else:
-                batch_size = 8 if mp.cpu_count() < 10 else 64
-                loader = EgoNetDataLoader(data3, self.fetched_nodes, batch_size=batch_size)
             intm_final_raw = inference_for_intermediate_result(self.model, loader)
             # rename the keys for alignment
             intm_final = {

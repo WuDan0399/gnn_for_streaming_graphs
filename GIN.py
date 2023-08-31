@@ -25,7 +25,7 @@ class GIN(torch.nn.Module):
 
         self.mlp = MLP([64, 64, out_channels], dropout=0.5)
 
-    def forward(self, x, edge_index, batch, ptr=None):
+    def forward(self, x, edge_index):
         out_per_layer = {}
         intermediate_result_per_layer = defaultdict(
             lambda: defaultdict(lambda: torch.empty((0))))
@@ -34,17 +34,16 @@ class GIN(torch.nn.Module):
             x, intermediate_result = conv(x, edge_index)
 
             if self.save_int:
-                # must contains time info, could contain intermediate
-                for key in intermediate_result:
-                    intermediate_result_per_layer[f"layer{i+1}"][key] = intermediate_result[key][ptr[:-1]]
-                # 这里处理一下，通过读取batch.ptr来获取只保存中心结点的信息
+                # must contain time info, could contain intermediate
+                # for key in intermediate_result:
+                #     intermediate_result_per_layer[f"layer{i+1}"][key] = intermediate_result[key][ptr[:-1]]
                 # out_per_layer[f"conv{i+1}"] = x.detach()
+                intermediate_result_per_layer[f"layer{i+1}"] = intermediate_result
 
             x = x.relu()
             # since out_per_layer is rarely used, I simply remove it.
 
-        x = global_add_pool(x, batch)
-        return self.mlp(x), out_per_layer, intermediate_result_per_layer
+        return None, out_per_layer, intermediate_result_per_layer
 
 
 # def train(model, train_loader, optimizer):
