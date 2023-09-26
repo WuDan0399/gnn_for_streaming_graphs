@@ -1,3 +1,5 @@
+paper: https://arxiv.org/pdf/2309.11071
+
 # Preparation:
 1. conda environment: baseline and modified.
         baseline: change aggr parameter in __init__ function to "min" for SAGEConv and 'max' for GINConv
