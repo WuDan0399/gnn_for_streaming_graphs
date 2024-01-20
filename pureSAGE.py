@@ -103,7 +103,6 @@ def main():
     else:
         model = pureSAGE(dataset.num_features, 256, dataset.num_classes, args).to(device)
 
-
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 
     available_model = []
@@ -167,12 +166,13 @@ def main():
             for _ in range(num_iter):
                 test(model, loader)
             end = time.perf_counter()
+
             print(
                 f'Full Graph. Inference time: {(end - start)/num_iter:.4f} seconds, averaged for {num_iter} iterations.')
-
         available_model.pop(index_best_model)
         clean(available_model)
 
 
 if __name__ == '__main__':
     main()
+

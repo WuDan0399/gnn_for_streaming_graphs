@@ -14,7 +14,7 @@ class EventQueue:
     def __init__(self):
         self.event_buffer_monotonic = []
         self.event_buffer_accumulative = []
-        self.event_buffer_user = []  # todo, implement for user-defined events
+        self.event_buffer_user = []
         self.message_buffer = []
 
 
@@ -71,6 +71,7 @@ class EventQueue:
     def bulky_push_user(self, old_out_neighbors:list, new_out_neighbors:list,
                      old_message:torch.Tensor, new_message:torch.Tensor, aggregator:str="min"):
          raise NotImplementedError("User-defined events are not supported yet")
+
     def empty(self):
         self.event_buffer_monotonic.clear()
         self.event_buffer_accumulative.clear()

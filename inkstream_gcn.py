@@ -2,6 +2,7 @@ from inkstream import inkstream
 from utils import *
 from GCN import GCN
 from EventQueue import *
+
 from load_dataset import load_dataset
 
 class inkstream_gcn(inkstream):

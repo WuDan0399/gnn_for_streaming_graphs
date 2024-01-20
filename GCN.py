@@ -11,6 +11,7 @@ from torch_geometric.logging import init_wandb, log
 from torch_geometric.nn import GCNConv
 
 from utils import *
+
 from load_dataset import load_dataset
 class GCN(torch.nn.Module) :
     def __init__(self, in_channels, hidden_channels, out_channels, args) :
@@ -45,7 +46,7 @@ class GCN(torch.nn.Module) :
         return x, out_per_layer, intermediate_result_per_layer
 
 
-def train(model, data, optimizer) :
+def train(model, data, optimizer):
     model.train()
     optimizer.zero_grad()
     result = model(data.x, data.edge_index, data.edge_attr)
@@ -57,19 +58,20 @@ def train(model, data, optimizer) :
 
 
 @torch.no_grad()
-def test(model, data) :
+def test(model, data):
     model.eval()
     result = model(data.x, data.edge_index, data.edge_attr)
     out = result[0]
     pred = out.argmax(dim=-1)
 
     accs = []
-    for mask in [data.train_mask, data.val_mask, data.test_mask] :
+    for mask in [data.train_mask, data.val_mask, data.test_mask]:
         accs.append(int((pred[mask] == data.y[mask]).sum()) / int(mask.sum()))
     return accs
 
+
 @torch.no_grad()
-def test_all(model, data) :
+def test_all(model, data):
     model.eval()
     result = model(data.x, data.edge_index, data.edge_attr)
     out = result[0]
@@ -82,8 +84,13 @@ def main():
     args = general_parser(parser)
     dataset = load_dataset(args)
 
-    init_wandb(name=f'GCN-{args.dataset}', lr=args.lr, epochs=args.epochs,
-               hidden_channels=args.hidden_channels, device=device)
+    init_wandb(
+        name=f"GCN-{args.dataset}",
+        lr=args.lr,
+        epochs=args.epochs,
+        hidden_channels=args.hidden_channels,
+        device=device,
+    )
 
     print_dataset(dataset)
     data = dataset[0]
@@ -99,16 +106,16 @@ def main():
 
     available_model = []
     name_prefix = f"{args.dataset}_GCN_{args.aggr}"
-    for file in os.listdir("examples/trained_model") :
-        if re.match(name_prefix + "_[0-9]+_[0-1]\.[0-9]+\.pt", file) :
+    for file in os.listdir("examples/trained_model"):
+        if re.match(name_prefix + "_[0-9]+_[0-1]\.[0-9]+\.pt", file):
             available_model.append(file)
 
-    if len(available_model) == 0 :  # no available model, train from scratch
+    if len(available_model) == 0:  # no available model, train from scratch
         best_test_acc = 0
         best_model_state_dict = None
         patience = args.patience
         it_patience = 0
-        for epoch in range(1, args.epochs + 1) :
+        for epoch in range(1, args.epochs + 1):
             loss = train(model, data, optimizer)
             train_acc, val_acc, tmp_test_acc = test(model, data)
             log(Epoch=epoch, Loss=loss, Train=train_acc, Val=val_acc, Test=tmp_test_acc)
@@ -117,22 +124,28 @@ def main():
                 best_model_state_dict = model.state_dict()
                 it_patience = 0
             else:
-                it_patience = it_patience+1
+                it_patience = it_patience + 1
                 if it_patience >= patience:
-                    print(f"No accuracy improvement {best_test_acc} in {patience} epochs. Early stopping.")
+                    print(
+                        f"No accuracy improvement {best_test_acc} in {patience} epochs. Early stopping."
+                    )
                     break
-        save(best_model_state_dict, epoch, tmp_test_acc, name_prefix)
+        save(best_model_state_dict, epoch, best_test_acc, name_prefix)
 
-    else :  # choose the model with the highest test acc
-        accuracy = [float(re.findall("[0-1]\.[0-9]+", model_name)[0]) for model_name in available_model if
-                    len(re.findall("[0-1]\.[0-9]+", model_name)) != 0]
+    else:  # choose the model with the highest test acc
+        accuracy = [
+            float(re.findall("[0-1]\.[0-9]+", model_name)[0])
+            for model_name in available_model
+            if len(re.findall("[0-1]\.[0-9]+", model_name)) != 0
+        ]
         index_best_model = np.argmax(accuracy)
         model = load(model, available_model[index_best_model])
         train_acc, val_acc, test_acc = test(model, data)
-        print(f'Test: {test_acc:.4f}')
+        print(f"Test: {test_acc:.4f}")
 
         available_model.pop(index_best_model)
         clean(available_model)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

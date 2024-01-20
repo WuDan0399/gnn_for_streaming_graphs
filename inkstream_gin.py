@@ -2,6 +2,7 @@ from inkstream import inkstream
 from utils import *
 from GIN import GIN
 from EventQueue import *
+
 from load_dataset import load_dataset
 
 class inkstream_gin(inkstream):
@@ -94,6 +95,7 @@ def main():
         batch_size = int(args.perbatch / 100 * data.num_edges)
     else:
         batch_size = int(args.perbatch)
+
 
     intr_result_dir = osp.join(
         "examples",
