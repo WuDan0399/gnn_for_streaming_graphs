@@ -7,7 +7,6 @@
 2. To use multi-threading (--mt n), do `ulimit 4096` first to avoid potential error of `OSError: [Errno 24] Too many open files`.
 
 
-
 GCN.py [baselinePyG]
     # patience epochs interval #
     Full graph GCN training.

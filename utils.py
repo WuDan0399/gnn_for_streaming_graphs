@@ -19,8 +19,6 @@ from torch_geometric.utils import degree
 from torch.utils.data import DataLoader
 from torch_geometric.utils import k_hop_subgraph
 from torch_geometric.data import Data, Batch
-
-
 from configs import *
 
 np.random.seed(0)
@@ -28,6 +26,7 @@ torch.manual_seed(0)
 torch.set_printoptions(precision=10)
 
 print_data_loader = True
+
 
 class bcolors:
     HEADER = "\033[95m"
@@ -634,7 +633,6 @@ def edge_remove(
     ]
 
     return sample_edges, edges_one_batch_missing
-
 
 def get_graph_dynamics(
     tensor: torch.Tensor, batch_size: int, stream: str = "mix"

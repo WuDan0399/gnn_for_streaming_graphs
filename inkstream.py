@@ -8,6 +8,7 @@ from utils import *
 from torch_geometric.data import Data
 from get_intermediate_result import inference_for_intermediate_result
 
+
 # import multiprocessing as mp
 import torch.multiprocessing as mp
 from torch.multiprocessing import Pool
@@ -263,8 +264,7 @@ class inkstream:
                     else:
                         # print(f"[covered] incremental compute {destination}")
                         condition = "covered"
-                        changed_aggred_dst = self.inc_aggregator_pair(aggred_dst, aggregated_new_message
-                                                                      )
+                        changed_aggred_dst = self.inc_aggregator_pair(aggred_dst, aggregated_new_message)
                         changed = True
 
             else:
@@ -342,8 +342,7 @@ class inkstream:
                             destination
                         ] = changed_aggred_dst
 
-                    next_layer_before_aggregation = changed_aggred_dst.unsqueeze(0).to(device
-                                                                                       )
+                    next_layer_before_aggregation = changed_aggred_dst.unsqueeze(0).to(device)
                     # start of dense computation, transfer to device for event propagation.
                     # transform to 2d like a batch of 1, for betch-wise operations.
                     for model_operation in operations_per_layer[1:]:
@@ -370,7 +369,6 @@ class inkstream:
                         event_q_bkp.bulky_push(initial_out_edge_dict[destination], current_out_edge_dict[destination],
                                                intm_initial[f"layer{it_layer + 2}"]["before"][destination],
                                                next_layer_before_aggregation, operations_per_layer[0])
-
                     # update the next layer input
                     out[destination] = next_layer_before_aggregation
 
@@ -504,7 +502,6 @@ class inkstream:
         except Exception as e:
             print(e)
             return None, None
-
         self.model.eval()
         event_q, event_q_bkp = EventQueue(), EventQueue()
 

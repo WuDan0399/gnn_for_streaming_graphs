@@ -7,7 +7,6 @@ if __name__ == '__main__':
     max_layer = 5
     batch_sizes = defaultConfigs.batch_sizes
     num_samples = defaultConfigs.num_samples
-
     create_directory(osp.join("examples", "theoretical"))
     parser = argparse.ArgumentParser()
     args = general_parser(parser)

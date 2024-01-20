@@ -153,7 +153,6 @@ def main():
         dict(params=model.conv2.parameters(), weight_decay=0)
     ], lr=args.lr)  # Only perform weight-decay on first convolution.
 
-
     available_model = []
     name_prefix = f"{args.dataset}_GCN_{args.aggr}"
     for file in os.listdir("examples/trained_model") :
