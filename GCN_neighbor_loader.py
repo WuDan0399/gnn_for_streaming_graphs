@@ -1,3 +1,4 @@
+# NOTE: run with baselinePyG conda env!
 #################################################################################
 #  Original Code from:
 #  https://github.com/pyg-team/pytorch_geometric/blob/master/examples/gcn.py
@@ -12,8 +13,12 @@ from torch_geometric.logging import init_wandb, log
 
 from tqdm import tqdm
 from utils import *
-from GCN import GCN
+from pureGCN import pureGCN
 
+import torch.profiler
+from torch.profiler import profile, record_function, ProfilerActivity
+
+from load_dataset import load_dataset
 
 def train(model, train_loader, optimizer) :
     model.train()
@@ -21,10 +26,18 @@ def train(model, train_loader, optimizer) :
     total_examples = total_loss = 0
     for batch in tqdm(train_loader) :
         optimizer.zero_grad()
-        batch = batch.to(device, 'edge_index')
+        batch = batch.to(device, 'x', 'y', 'edge_index')
         batch_size = batch.batch_size
-        out, _ = model(batch.x, batch.edge_index)
-        loss = F.cross_entropy(out[:batch_size], batch.y[:batch_size])
+        out = model(batch.x, batch.edge_index)
+        # classification task with 1 scalar label, cannot be used in training
+        y = batch.y[:batch_size]
+        if len(batch.y.shape) == 1:
+            # out = out.argmax(dim=-1).float()
+            y = torch.nn.functional.one_hot(y.long(), num_classes=out.shape[1]).float()
+        elif batch.y.shape[1] == 1: # 2d array but 1 element in each row.
+            # out = out.argmax(dim=-1).reshape((-1,1)).float()
+            y = torch.nn.functional.one_hot(y.long().flatten(), num_classes=out.shape[1]).float()
+        loss = F.cross_entropy(out[:batch_size], y.float())
         loss.backward()
         optimizer.step()
 
@@ -35,68 +48,116 @@ def train(model, train_loader, optimizer) :
 
 
 @torch.no_grad()
-def test(model, loader) :
+def test(model, loader):
     model.eval()
-
     total_examples = total_correct = 0
-    for batch in tqdm(loader) :
-        batch = batch.to(device, 'edge_index')
+    print(len(iter(loader)))
+    for batch in tqdm(loader):
+        batch = batch.to(device)
         batch_size = batch.batch_size
-        out, _ = model(batch.x, batch.edge_index)
-
-        if len(batch.y.shape) !=1:
-            pred = (out > 1).float()
-            total_correct += int((pred[:batch_size] == batch.y[:batch_size]).sum())  # element-wise compare for each task.
-            total_examples += batch_size*batch.y.shape[1]  # classification for each task
-        else:
-            pred = out.argmax(dim=-1) # one-hot
-            total_correct += int((pred[:batch_size] == batch.y[:batch_size]).sum())
+        batch_y = batch.y[:batch_size]
+        out = model(batch.x, batch.edge_index)
+        if len(batch_y.shape) == 1:  # single label classification
+            pred = out.argmax(dim=-1)  # one-hot
+            total_correct += int((pred[:batch_size] == batch_y).sum())
             total_examples += batch_size
-
+        elif batch_y.shape[1] == 1:  # single label classification
+            pred = out.argmax(dim=-1)  # one-hot
+            total_correct += int((pred[:batch_size] == batch_y.flatten()).sum())
+            total_examples += batch_size
+        else:  # multi-label classification
+            pred = (out > 1).float()
+            # element-wise compare for each task.
+            total_correct += int((pred[:batch_size] == batch_y).sum())
+            # classification for each task
+            total_examples += batch_size * batch_y.shape[1]
     return total_correct / total_examples
 
 
+@torch.no_grad()
+def test_w_profiler(model, loader):
+    model.eval()
+    total_examples = total_correct = 0
+    data_iter = iter(loader)
+    with torch.profiler.profile(
+            schedule=torch.profiler.schedule(wait=10, warmup=10, active=1000, repeat=1),
+            on_trace_ready=torch.profiler.tensorboard_trace_handler('./log'),
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            # with_stack=True,
+            profile_memory=True
+    ) as prof:
+        print(f"Loader iterations: {len(loader)}")
+        for i in tqdm(range(len(loader))):
+            if i > 1200:
+                break
+            with torch.profiler.record_function("Subgraph consitution"):
+                batch = next(data_iter)
+
+            with torch.profiler.record_function("Data Trasfer"):
+                batch = batch.to(device)
+
+            batch_size = batch.batch_size
+
+            with torch.profiler.record_function("model_inference"):
+                out = model(batch.x, batch.edge_index)
+
+            if len(batch.y.shape) != 1:
+                pred = (out > 1).float()
+                total_correct += int(
+                    (pred[:batch_size] == batch.y[:batch_size]).sum())  # element-wise compare for each task.
+                total_examples += batch_size * batch.y.shape[1]  # classification for each task
+            else:
+                pred = out.argmax(dim=-1)  # one-hot
+                total_correct += int((pred[:batch_size] == batch.y[:batch_size]).sum())
+                total_examples += batch_size
+
+            del batch
+            torch.cuda.empty_cache()
+
+            prof.step()  # Call this at the end of each step to record stats for the step
+
+    print(prof.key_averages().table())
+    # After profiling, analyze the results.
+    for avg in prof.key_averages():
+        print(f"{avg.key}: {avg.cpu_time_total}")
+        print(f"{avg.key}: {avg.cuda_time_total}")
+
+    # print(prof.key_averages().table())
+    # save results to a file
+    # prof.export_chrome_trace("trace.json")
+
+    return total_correct / total_examples
+
 def main():
+    # args = FakeArgs(dataset="products", aggr='min')
     parser = argparse.ArgumentParser()
     args = general_parser(parser)
+    print("try load dataset")
     dataset = load_dataset(args)
 
-    init_wandb(name=f'GCN-{args.dataset}', lr=args.lr, epochs=args.epochs,
-               hidden_channels=args.hidden_channels, device=device)
-
-    print_dataset(dataset)
+    # print_dataset(dataset)
     data = dataset[0]
     add_mask(data)
-    # data.y = data.y.type(torch.float32) # for amazon dataset, the y is int rather than float
 
-    print_data(data)
-
+    # print_data(data)
+    # timing_sampler(data, args)
     train_loader, val_loader, test_loader = data_loader(data, num_layers=2, num_neighbour_per_layer=10, separate=True)
-
-    model = GCN(dataset.num_features, args.hidden_channels, dataset.num_classes, args)
-    model, data = model.to(device), data.to(device)
+    torch.where(data.test_mask == True)
+    if args.dataset == 'papers':
+        model = pureGCN(dataset.num_features, args.hidden_channels, dataset.num_classes+1, args)
+    else:
+        model = pureGCN(dataset.num_features, args.hidden_channels, dataset.num_classes, args)
+    model, data = model.to(device), data
     optimizer = torch.optim.Adam([
         dict(params=model.conv1.parameters(), weight_decay=5e-4),
         dict(params=model.conv2.parameters(), weight_decay=0)
     ], lr=args.lr)  # Only perform weight-decay on first convolution.
 
 
-    if args.use_gdc :
-        transform = T.GDC(
-            self_loop_weight=1,
-            normalization_in='sym',
-            normalization_out='col',
-            diffusion_kwargs=dict(method='ppr', alpha=0.05),
-            sparsification_kwargs=dict(method='topk', k=128, dim=0),
-            exact=True,
-        )
-        data = transform(data)
-
-
     available_model = []
     name_prefix = f"{args.dataset}_GCN_{args.aggr}"
     for file in os.listdir("examples/trained_model") :
-        if re.match(name_prefix + "_[0-9]+_[0-1]\.[0-9]+\.pt", file) :
+        if re.match(name_prefix + "_[0-9]+_[0-9]\.[0-9]+\.pt", file) :
             available_model.append(file)
 
     if len(available_model) == 0 :  # no available model, train from scratch
@@ -120,15 +181,22 @@ def main():
         save(best_model_state_dict, epoch, best_test_acc, name_prefix)
 
     else :  # choose the model with the highest test acc
-        accuracy = [float(re.findall("[0-1]\.[0-9]+", model_name)[0]) for model_name in available_model if
-                    len(re.findall("[0-1]\.[0-9]+", model_name)) != 0]
+        print("Inference with full graph as input.")
+        if args.interval > 0:
+            # timing_sampler(data, args)  # get the latest 'interval' edges for inference.
+            print(f"Num Edges: {data.num_edges}")
+        else:
+            print("Disable edge sampling according to creation time.")
+
+        loader = data_loader(data, num_layers=2, num_neighbour_per_layer=-1, separate=False)  # load all neighbours
+        accuracy = [float(re.findall("[0-9]\.[0-9]+", model_name)[0]) for model_name in available_model if
+                    len(re.findall("[0-9]\.[0-9]+", model_name)) != 0]
         index_best_model = np.argmax(accuracy)
-        model = load(model, available_model[index_best_model])
-        test_acc = test(model, test_loader)
+        model = load(model, available_model[index_best_model]).to(device)
+        test_acc = test(model, loader)
         print(f'Test: {test_acc:.4f}')
 
         available_model.pop(index_best_model)
-        clean(available_model)
 
 if __name__ == '__main__':
-    main()
+        main()
