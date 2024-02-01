@@ -204,59 +204,54 @@ class inkstream:
         return True, changed_aggred_dst, "recompute"
 
     def incremental_aggregation_mono(self, events:dict=None, it_layer:int=-1, destination:int=-1, current_in_edge_dict:dict={}, intm_initial:dict={}) -> Tuple[bool, torch.Tensor, str]:
-        if ("remove" not in events and "insert" not in events):  # todo: add "update"
-            # activated by user-defined events, but not aggregation
-            return False, None, ""
-
         # old aggregated timing_result
         aggred_dst = intm_initial[f"layer{it_layer}"]["after"][destination]
-        aggregated_new_message = events["insert"]
+        no_new_message = "insert" not in events
+        if not no_new_message:
+            aggregated_new_message = events["insert"]
         # conditions，do not change the order in return value!
-        condition = ""
         if "remove" not in events:
             # add-only, aggregated_new_message cannot be []
             condition = "add_only"
-            changed_aggred_dst = self.inc_aggregator_pair(aggred_dst, aggregated_new_message)
-            changed = True if not torch.all(
-                changed_aggred_dst == aggred_dst) else False
+            changed_aggred_dst = torch.minimum(aggred_dst, aggregated_new_message)
+            # changed_aggred_dst = self.inc_aggregator_pair(aggred_dst, aggregated_new_message)
+            changed = not torch.equal(changed_aggred_dst, aggred_dst)
+            # changed = not torch.all(changed_aggred_dst == aggred_dst)
 
         else:
             aggregated_old_message = events["remove"]
-            remove_mask = aggred_dst == aggregated_old_message
-            if torch.sum(remove_mask) != 0:
-                if aggregated_new_message == []:
+            remove_mask = (aggred_dst == aggregated_old_message)
+            if remove_mask.any():
+                if no_new_message: # if no aggregated_new_message, then initialized with list by defaultdict of events
                     # remove-only, aggregated_new_message is [], old values dominates, cannot recover, recompute
                     # print(f"recomputed {destination}")
                     condition = "recompute"
                     neighbours = current_in_edge_dict[destination]  #
                     if neighbours != []:
-                        if (type(intm_initial[f"layer{it_layer}"]["before"])
-                            == torch.Tensor
-                            ):
-                            message_list = intm_initial[f"layer{it_layer}"]["before"][
-                                neighbours
-                            ]
-                        else:
-                            message_list = get_stacked_tensors_from_dict(intm_initial[f"layer{it_layer}"]["before"], neighbours)
+                        # if (type(intm_initial[f"layer{it_layer}"]["before"])
+                        #     == torch.Tensor
+                        #     ):
+                        #     message_list = intm_initial[f"layer{it_layer}"]["before"][neighbours]
+                        # else:
+                        message_list = get_stacked_tensors_from_dict(intm_initial[f"layer{it_layer}"]["before"], neighbours)
                         changed_aggred_dst = self.inc_aggregator(message_list).values
                     else:
                         changed_aggred_dst = torch.zeros(aggred_dst.shape)  # if no message, get 0s
                     changed = True
 
                 else:
-                    masked_new_old_message = torch.stack(
-                        (aggregated_new_message[remove_mask], aggregated_old_message[remove_mask]))
-                    aggregated_new_old_message = self.inc_aggregator(masked_new_old_message)
-                    if torch.sum(aggregated_new_old_message.indices) != 0:
+                    # aggregated_new_old_message = self.inc_aggregator_pair(aggregated_new_message[remove_mask], aggregated_old_message[remove_mask])
+                    all_less = torch.le(aggregated_new_message[remove_mask], aggregated_old_message[remove_mask]).all()
+                    if all_less:
                         # old values dominates, cannot recover, recompute
                         # print(f"recomputed {destination}")
                         condition = "recompute"
                         neighbours = current_in_edge_dict[destination]
                         if neighbours != []:
-                            if (type(intm_initial[f"layer{it_layer}"]["before"]) == torch.Tensor):
-                                message_list = intm_initial[f"layer{it_layer}"]["before"][neighbours]
-                            else:
-                                message_list = get_stacked_tensors_from_dict(intm_initial[f"layer{it_layer}"]["before"], neighbours)
+                            # if isinstance(intm_initial[f"layer{it_layer}"]["before"], torch.Tensor):  # commented out for optimization
+                            #     message_list = intm_initial[f"layer{it_layer}"]["before"][neighbours]
+                            # else:
+                            message_list = get_stacked_tensors_from_dict(intm_initial[f"layer{it_layer}"]["before"], neighbours)
                             changed_aggred_dst = self.inc_aggregator(message_list).values
                         else:
                             changed_aggred_dst = torch.zeros(aggred_dst.shape)
@@ -264,26 +259,24 @@ class inkstream:
                     else:
                         # print(f"[covered] incremental compute {destination}")
                         condition = "covered"
-                        changed_aggred_dst = self.inc_aggregator_pair(aggred_dst, aggregated_new_message)
+                        changed_aggred_dst = torch.minimum(aggred_dst, aggregated_new_message)
+                        # changed_aggred_dst = self.inc_aggregator_pair(aggred_dst, aggregated_new_message)
                         changed = True
 
             else:
                 condition = "del_no_change"
-                if not aggregated_new_message == []:
-                    # print(f"[no change for remove] incremental compute {destination}")
-                    changed_aggred_dst = self.inc_aggregator_pair(aggred_dst, aggregated_new_message
-                                                                  )
-                    changed = (True
-                               if not torch.all(changed_aggred_dst == aggred_dst)
-                               else False
-                               )
-                else:
+                if no_new_message:
                     # print(f"[no change for remove and no insert] {destination}")
                     changed = False
                     changed_aggred_dst = None
+                else:
+                    # print(f"[no change for remove] incremental compute {destination}")
+                    changed_aggred_dst = torch.minimum(aggred_dst, aggregated_new_message)
+                    changed = not torch.equal(changed_aggred_dst, aggred_dst)
+                    # changed_aggred_dst = self.inc_aggregator_pair(aggred_dst, aggregated_new_message)
+                    # changed = not torch.all(changed_aggred_dst == aggred_dst)
 
         return changed, changed_aggred_dst, condition
-        # load context for each sample, e.g., data structure in former\current time, changed edges, saved intermediate values.
 
     @torch.no_grad()
     def incremental_inference_st(self, initial_out_edge_dict: dict, initial_in_edge_dict: dict, current_out_edge_dict: dict, current_in_edge_dict: dict, intm_initial: dict, inserted_edges: list, removed_edges: list):
@@ -333,14 +326,10 @@ class inkstream:
                 else:
                     if not aggr_changed:
                         # print("no change for aggregation, but propagation continues due to user-defined events")
-                        changed_aggred_dst = intm_initial[f"layer{it_layer+1}"][
-                            "after"
-                        ][destination]
+                        changed_aggred_dst = intm_initial[f"layer{it_layer+1}"]["after"][destination]
                     else:
                         # print("change for aggregation, propagation continues")
-                        intm_initial[f"layer{it_layer+1}"]["after"][
-                            destination
-                        ] = changed_aggred_dst
+                        intm_initial[f"layer{it_layer+1}"]["after"][destination] = changed_aggred_dst
 
                     next_layer_before_aggregation = changed_aggred_dst.unsqueeze(0).to(device)
                     # start of dense computation, transfer to device for event propagation.
@@ -416,7 +405,7 @@ class inkstream:
             cnt_dict, t_inc = self.incremental_inference_st(
                 init_out_edge_dict, init_in_edge_dict, final_out_edge_dict, final_in_edge_dict, intm_initial, inserted_edges, removed_edges)
             t_distribution.append(t_inc)
-            print("inkstream time:", t_distribution)
+            # print("inkstream time:", t_distribution)
 
             for it_layer in cnt_dict.keys():
                 condition_distribution[it_layer].append([
@@ -425,7 +414,7 @@ class inkstream:
             if self.verify:
                 self.verification(data, data_dir, final_edges, inserted_edges, removed_edges,
                                   init_out_edge_dict, final_out_edge_dict, intm_initial, cnt_dict)
-
+        print(f"inkstream time ({self.aggregator}):", t_distribution)
         return condition_distribution, t_distribution
 
     @torch.no_grad()
@@ -433,14 +422,6 @@ class inkstream:
         try:
             aggr_changed, changed_aggred_dst, condition = self.incremental_aggregation_mono(
                 self.event_dict[destination], it_layer + 1, destination, current_in_edge_dict, intm_initial)
-
-            # aggr_changed = True
-            # if "insert" in self.event_dict[destination]:
-            #     shape = self.event_dict[destination]["insert"].shape
-            # else:
-            #     shape = self.event_dict[destination]["remove"].shape
-            # changed_aggred_dst = torch.zeros(shape)
-            # condition = 0
         except Exception as e:
             print("Caught exception in multiprocessing pool: incremental_aggregation")
             print(e)

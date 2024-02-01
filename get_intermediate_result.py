@@ -75,7 +75,7 @@ def main():
     dataset = load_dataset(args)
     print_dataset(dataset)
     data = dataset[0]
-    timing_sampler(data, args)
+    # timing_sampler(data, args)
 
     if args.perbatch < 1 :
         batch_size = int(args.perbatch / 100 * data.num_edges)  # perbatch is [x]%, so divide by 100

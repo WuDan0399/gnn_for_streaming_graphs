@@ -116,12 +116,14 @@ def main():
         starter = inkstream_sage(model, intr_result_dir,
                                  multi_thread=args.mt, aggregator=args.aggr, verify=False)
         condition_distribution, exec_time_dist = starter.batch_incremental_inference(data, niters=num_sample)
-        if args.aggr in ["min", 'max']:
-            for it_layer in condition_distribution.keys():
-                np.save(osp.join(conditions_dir,
-                                 f"[tot_add_delno_cov_rec]SAGE_{args.dataset}_{args.stream}_{batch_size}_layer{it_layer}.npy"),
-                        condition_distribution[it_layer])
-        np.save(osp.join(time_dir, f"SAGE_{args.dataset}_{args.aggr}_{args.stream}_batch_size_{batch_size}.npy"), exec_time_dist)
+        unique_id = 0
+        while osp.exists(osp.join(time_dir, f"SAGE_{args.dataset}_{args.aggr}_{args.stream}_batch_size_{batch_size}_{unique_id}.npy")):
+            unique_id += 1
+        for it_layer in condition_distribution.keys():
+            np.save(osp.join(conditions_dir,
+                             f"[tot_add_delno_cov_rec]SAGE_{args.dataset}_{args.aggr}_{args.stream}_{batch_size}_layer{it_layer}_{unique_id}.npy"),
+                    condition_distribution[it_layer])
+        np.save(osp.join(time_dir, f"SAGE_{args.dataset}_{args.aggr}_{args.stream}_batch_size_{batch_size}_{unique_id}.npy"), exec_time_dist)
     else:
         if not isinstance(args.id, int) and args.id >= 0:
             raise ValueError("missing argument --id when --mt is used.")

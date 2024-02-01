@@ -713,13 +713,24 @@ def create_directory(path):  # by chatgpt
 
 
 # @measure_time
-def to_dict(edges: torch.Tensor):
+def to_dict(edges: torch.Tensor): # faster
+    from tqdm import tqdm
+    print("start building edge dict")
     edge_dict = defaultdict(list)
-    for i in range(edges.size(1)):
-        source_node = edges[0, i].item()
-        dest_node = edges[1, i].item()
-        edge_dict[source_node].append(dest_node)
-    return edge_dict
+    sources, destinations = edges[0].tolist(), edges[1].tolist()
+    pbar = tqdm(total=len(sources))
+    for i, (source, dest) in enumerate(zip(sources, destinations)):
+        edge_dict[source].append(dest)
+        if i % 1000000 == 0:
+            pbar.update(1000000)
+    pbar.close()
+# def to_dict(edges: torch.Tensor):  # slower
+#     edge_dict = defaultdict(list)
+#     for i in range(edges.size(1)):
+#         source_node = edges[0, i].item()
+#         dest_node = edges[1, i].item()
+#         edge_dict[source_node].append(dest_node)
+#     return edge_dict
 
 
 def get_stacked_tensors_from_dict(dictionary: dict, ids):
@@ -742,3 +753,4 @@ def get_open_fds():
     output = subprocess.check_output(['lsof', '-p', str(pid)])
     lines = output.decode().strip().split('\n')
     return len(lines) - 1
+

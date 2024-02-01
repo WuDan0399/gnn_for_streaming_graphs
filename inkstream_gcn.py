@@ -46,7 +46,7 @@ class inkstream_gcn(inkstream):
 
 def main():
     # device = 'cpu'
-    # args = FakeArgs(dataset="cora", aggr="mean", perbatch=100, stream="mix", it=0, model="GCN", save_int=True)
+    # args = FakeArgs(dataset="cora", aggr="min", perbatch=100, stream="mix", it=0, model="GCN", save_int=True)
     parser = argparse.ArgumentParser()
     args = general_parser(parser)
     dataset = load_dataset(args)
@@ -92,17 +92,19 @@ def main():
     if args.mt == 0:
         starter = inkstream_gcn(model, intr_result_dir, aggregator=args.aggr, verify=False)
         condition_distribution, exec_time_dist = starter.batch_incremental_inference(data, niters=num_sample)
-        if args.aggr in ["min",'max']: # save only for monotonic aggregator
-            for it_layer in condition_distribution.keys():
-                np.save(
-                    osp.join(
-                        conditions_dir,
-                        f"[tot_add_delno_cov_rec]GCN_{args.dataset}_{args.stream}_{batch_size}_layer{it_layer}.npy",
-                    ),
-                    condition_distribution[it_layer],
-                )
+        unique_id = 0
+        while osp.exists(osp.join(time_dir,f"GCN_{args.dataset}_{args.aggr}_{args.stream}_batch_size_{batch_size}_{unique_id}.npy")):
+            unique_id += 1
+        for it_layer in condition_distribution.keys():
+            np.save(
+                osp.join(
+                    conditions_dir,
+                    f"[tot_add_delno_cov_rec]GCN_{args.dataset}_{args.aggr}_{args.stream}_{batch_size}_layer{it_layer}_{unique_id}.npy",
+                ),
+                condition_distribution[it_layer],
+            )
         np.save(
-            osp.join(time_dir, f"GCN_{args.dataset}_{args.aggr}_{args.stream}_batch_size_{batch_size}.npy"),
+            osp.join(time_dir, f"GCN_{args.dataset}_{args.aggr}_{args.stream}_batch_size_{batch_size}_{unique_id}.npy"),
             exec_time_dist,
         )
     else:

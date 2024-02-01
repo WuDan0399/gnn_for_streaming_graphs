@@ -80,7 +80,7 @@ def generate_snapshots(data:Data, dataset_name:str, stream:str, args:argparse.Na
     # Export intial, final, "edge added" to folder
     batch_sizes = defaultConfigs.batch_sizes
     num_samples = defaultConfigs.num_samples
-
+    print("generate snapshots, start. snapshot saved to ",  osp.join("examples", "intermediate", dataset_name, "min", stream))
     # sample the edges randomly   #Currently this step is done outside in each training file.
     timing_sampler(data, args)
 
@@ -144,7 +144,7 @@ def generate_snapshots(data:Data, dataset_name:str, stream:str, args:argparse.Na
                     torch.save(inserted_edges, (osp.join(out_folder, "inserted_edges.pt")))
                 if removed_edges.shape[1]:
                     torch.save(removed_edges, (osp.join(out_folder, "removed_edges.pt")))
-
+    print("generate snapshots, end.")
 
 def one_hot_fake_label(dataset: pyg.data.Data, max_degree: int = 1000) -> list:
     new_dataset = []
@@ -223,14 +223,14 @@ def load_dataset(args: argparse.Namespace, transform: Optional[Callable] = None)
             dataset = RandFeatDataset(dir=osp.join(root, "datasets", "dynamic_datasets", "epinions"),
                                       file_name="user_rating.csv", dataset_name="epi", transform = transform)
         else:
-            print("No such dataset. Available: Cora/cora/PubMed/reddit/yelp/uci/dnc/epi")
+            print("No such dataset. Available: Cora/cora/PubMed/reddit/yelp/uci/dnc/epi/products/papers")
 
     if args.binary:
         # one-hot encoding of node degree as node attribute, transform the dataset into a binary classification dataset
         print("Processing: change to one-hot node attribute, generate fake labels")
         dataset = one_hot_fake_label(dataset, max_degree=500)
 
-    generate_snapshots(dataset[0], args.dataset, args.stream, args)  # generate snapshots for the first(only) graph
+    # generate_snapshots(dataset[0], args.dataset, args.stream, args)  # generate snapshots for the first(only) graph
 
     return dataset
 

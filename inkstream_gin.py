@@ -127,17 +127,18 @@ def main():
             verify=False,
         )
         condition_distribution, exec_time_dist = starter.batch_incremental_inference(data, niters=num_sample)
-        if args.aggr in ["min", 'max']:
-            for it_layer in condition_distribution.keys():
-                np.save(
-                    osp.join(
-                        conditions_dir,
-                        f"[tot_add_delno_cov_rec]GIN_{args.dataset}_{args.stream}_{batch_size}_layer{it_layer}.npy",
-                    ),
-                    condition_distribution[it_layer],
-                )
+        unique_id = 0
+        while osp.exists(osp.join(time_dir,f"GIN_{args.dataset}_{args.aggr}_{args.stream}_batch_size_{batch_size}_{unique_id}.npy")):
+            unique_id += 1
+        for it_layer in condition_distribution.keys():
+            np.save(
+                osp.join(
+                    conditions_dir,
+                    f"[tot_add_delno_cov_rec]GIN_{args.dataset}_{args.aggr}_{args.stream}_{batch_size}_layer{it_layer}_{unique_id}.npy",
+                ),
+                condition_distribution[it_layer])
         np.save(
-            osp.join(time_dir, f"GIN_{args.dataset}_{args.aggr}_{args.stream}_batch_size_{batch_size}.npy"),
+            osp.join(time_dir, f"GIN_{args.dataset}_{args.aggr}_{args.stream}_batch_size_{batch_size}_{unique_id}.npy"),
             exec_time_dist,
         )
     else:
