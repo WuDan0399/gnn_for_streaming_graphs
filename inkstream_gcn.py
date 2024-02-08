@@ -47,8 +47,6 @@ class inkstream_gcn(inkstream):
 
 
 def main():
-    # device = 'cpu'
-    # args = FakeArgs(dataset="products", aggr="mean", perbatch=10000, stream="mix", it=0, model="GCN", save_int=True, interval=15000000)
     parser = argparse.ArgumentParser()
     args = general_parser(parser)
     dataset = load_dataset(args)

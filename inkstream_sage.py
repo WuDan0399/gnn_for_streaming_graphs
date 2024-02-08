@@ -75,7 +75,6 @@ class inkstream_sage(inkstream):
 
 
 def main():
-    # args = FakeArgs(dataset="cora", model="SAGE", aggr="min", perbatch=1, stream="add")
     parser = argparse.ArgumentParser()
     args = general_parser(parser)
     dataset = load_dataset(args)

@@ -75,8 +75,6 @@ class inkstream_gin(inkstream):
 
 
 def main():
-    # args = FakeArgs(dataset="cora", aggr="min", perbatch=1,
-    #                 stream="mix", model="GIN", save_int=True)
     parser = argparse.ArgumentParser()
     args = general_parser(parser)
     dataset = load_dataset(args)

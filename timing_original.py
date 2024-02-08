@@ -82,8 +82,6 @@ def inference_affected(data, model, edge_dict: dict, connected_nodes, nlayers, e
         total_affected_nodes = copy_total_affected_nodes  # .copy()
     batch_affected_nodes = torch.LongTensor(list(total_affected_nodes))
     print(f"time for geting affected area {time.perf_counter()-start} s")
-    # mid = time.perf_counter() # takes only 0.01% of total inference time for #update=1 on cora
-    # if not egonet:
     if x is not None:
         if quiver_sampler is None:
             raise ValueError("quiver_sampler is not provided, but quiver feature is provided.")
@@ -110,11 +108,6 @@ def inference_affected(data, model, edge_dict: dict, connected_nodes, nlayers, e
             model(batch.x, batch.edge_index)
 
 
-    # else:
-    #     loader = EgoNetDataLoader(data, batch_affected_nodes, **kwargs)
-    #     for batch in loader:
-    #         batch = batch.to(device)
-    #         model(batch.x, batch.edge_index, batch.batch)
     end = time.perf_counter()
     # print(f"Ratio of data loading: {(t_load)/(end-start)}")
     return end - start
@@ -184,24 +177,24 @@ def main():
     dataset = load_dataset(args)
 
     data = dataset[0]
-    use_loader = True # is_large(data) or args.use_loader
+    use_loader = True  # is_large(data) or args.use_loader
 
     if args.loader == "quiver":
         csr_topo = quiver.CSRTopo(data.edge_index)  # Quiver
         x = quiver.Feature(rank=0, device_list=[0], device_cache_size="4G", cache_policy="device_replicate",
                            csr_topo=csr_topo)  # Quiver
         x.from_cpu_tensor(data.x)  # Quiver
-    
+
     out_channels = dataset.num_classes if args.dataset != "papers" else dataset.num_classes + 1
     if args.model == "GCN":
-        
+
         model = pureGCN(dataset.num_features,
                         args.hidden_channels, out_channels, args)
     elif args.model == "SAGE":
         model = pureSAGE(dataset.num_features,
                          args.hidden_channels, out_channels, args)
     elif args.model == "GIN":
-        model = pureGIN(dataset.x.shape[1], out_channels, args).to(device)  # todo: or should I use 2 as some model may not be retrained?
+        model = pureGIN(dataset.x.shape[1], out_channels, args).to(device)
 
     available_model = []
     name_prefix = f"{args.dataset}_{args.model}_{args.aggr}"

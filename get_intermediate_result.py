@@ -86,20 +86,15 @@ def main():
 
     niters = int(1000 // args.perbatch)  # times for small batch deletion (initial state)
     print(f"Iterations: {niters}")
-    # args = FakeArgs(dataset="Cora", aggr="min", perbatch=10, stream="mix", interval=50000)
     dataset = load_dataset(args)
     print_dataset(dataset)
     data = dataset[0]
-    # timing_sampler(data, args)
 
     if args.perbatch < 1 :
         batch_size = int(args.perbatch / 100 * data.num_edges)  # perbatch is [x]%, so divide by 100
     else :
         batch_size = int(args.perbatch)
     print(f"Batch size for streaming graph: {batch_size}")
-
-    # model = GCN(dataset.num_features, args.hidden_channels, dataset.num_classes, args)
-    # model = load_available_model(model, args).to(device)
 
     for i in tqdm(range(niters)):
         out_folder = osp.join("examples", "intermediate", args.dataset, args.aggr, args.stream, f"batch_size_{batch_size}", str(i))
@@ -113,31 +108,6 @@ def main():
             torch.save(inserted_edges, (osp.join(out_folder, "inserted_edges.pt")))
         if removed_edges.shape[1] :
             torch.save(removed_edges, (osp.join(out_folder, "removed_edges.pt")))
-
-        # fake input for debuging
-        # out_folder = osp.join("examples", "intermediate", args.dataset, args.aggr, args.stream,
-        #                       f"batch_size_{batch_size}", '7')
-        # folder = osp.join("examples", "intermediate", "Cora", "min", 'add',"batch_size_1")
-        # data_dir = '7'
-        # initial_edges = torch.load(osp.join(folder, data_dir, "initial_edges.pt"))
-        # final_edges = torch.load(osp.join(folder, data_dir, "final_edges.pt"))
-        # inserted_edges = torch.load(osp.join(folder, data_dir, "inserted_edges.pt"))
-        # removed_edges = torch.load(osp.join(folder, data_dir, "removed_edges.pt"))
-
-
-        # # Final Result
-        # data2 = Data(x=data.x, edge_index=final_edges)
-        # data2.to(device)
-        # loader = data_loader(data2, num_layers=2, num_neighbour_per_layer=-1, separate=False)
-        # _ = inference_for_intermediate_result(model, loader, out_folder, "_final")  #
-        #
-        #
-        # ## run inference for the initial graph (before edge adding).
-        # data3 = Data(x=data.x, edge_index=initial_edges)
-        # data3.to(device)
-        # post_fix = "_initial"
-        # loader2 = data_loader(data3, num_layers=2, num_neighbour_per_layer=-1, separate=False)
-        # _ = inference_for_intermediate_result(model, loader2, out_folder, post_fix)
 
 
 if __name__ == '__main__':
