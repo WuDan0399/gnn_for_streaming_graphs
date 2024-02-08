@@ -12,10 +12,10 @@ if __name__ == '__main__':
     dataset = load_dataset(args)
 
     data = dataset[0]
+
     # edge_dict_full = to_dict(data.edge_index)  # for full graph
     # f = open(osp.join("examples", "theoretical", f"affected_{args.dataset}_first_case.txt"), "a")
     # f.write(f"batch_size\t#layer\t#examples\tavg_affected_ratio(sampled)\tstd_affected_ratio(sampled)\tavg_affected_ratio(full)\tstd_affected_ratio(full)\n")
-
     num_samples = [10]
     batch_sizes = [1]
     for batch_size, num_sample in zip(batch_sizes, num_samples):
@@ -65,3 +65,4 @@ if __name__ == '__main__':
         #             f"{np.std(affected_ratio_sampled[i])}\t"
         #             f"{np.mean(affected_ratio_full[i])}\t"
         #             f"{np.std(affected_ratio_full[i])}\n")
+

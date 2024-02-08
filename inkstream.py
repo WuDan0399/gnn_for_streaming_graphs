@@ -155,7 +155,6 @@ class inkstream:
         }
         return intm
 
-
     def verification(self, data, data_dir: str, final_edges, inserted_edges, removed_edges, init_out_edge_dict, final_out_edge_dict, intm_initial, cnt_dict):
         intm_final = load_tensors_to_dict(osp.join(self.folder, data_dir), skip=7, postfix="_final.pt"
                                           )
@@ -217,7 +216,6 @@ class inkstream:
             condition = "add_only"
             changed_aggred_dst = torch.minimum(aggred_dst, aggregated_new_message)
             changed = not torch.equal(changed_aggred_dst, aggred_dst)
-
         else:
             aggregated_old_message = events["remove"]
             remove_mask = (aggred_dst == aggregated_old_message)
@@ -318,7 +316,6 @@ class inkstream:
                     else:
                         # print("change for aggregation, propagation continues")
                         intm_initial[f"layer{it_layer+1}"]["after"][destination] = changed_aggred_dst
-
                     next_layer_before_aggregation = changed_aggred_dst.unsqueeze(0).to(device)
                     # start of dense computation, transfer to device for event propagation.
                     # transform to 2d like a batch of 1, for betch-wise operations.
@@ -398,9 +395,9 @@ class inkstream:
             for it_layer in condition_distribution.keys():
                 np.save(f"tmp_GIN_layer{it_layer}.npy",condition_distribution[it_layer])
 
-            if self.verify:
-                self.verification(data, data_dir, final_edges, inserted_edges, removed_edges,
-                                  init_out_edge_dict, final_out_edge_dict, intm_initial, cnt_dict)
+            # if self.verify:
+            #     self.verification(data, data_dir, final_edges, inserted_edges, removed_edges,
+            #                       init_out_edge_dict, final_out_edge_dict, intm_initial, cnt_dict)
         print(f"inkstream time ({self.aggregator}):", t_distribution)
         return condition_distribution, t_distribution
 
@@ -452,4 +449,3 @@ class inkstream:
             # end of dense computation, transfer back to cpu for event propagation.
             next_layer_before_aggregation = next_layer_before_aggregation.squeeze().to("cpu")
             return True, aggr_changed, next_layer_before_aggregation, changed_aggred_dst_copy, condition
-

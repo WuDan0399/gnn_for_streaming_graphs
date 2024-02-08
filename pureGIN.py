@@ -108,7 +108,6 @@ if __name__ == '__main__':
     # add_mask(data)
     timing_sampler(data, args)
 
-
     available_model = []
     name_prefix = f"{args.dataset}_GIN_{args.aggr}"
     for file in os.listdir("examples/trained_model"):

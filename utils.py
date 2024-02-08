@@ -788,4 +788,3 @@ def get_open_fds():
     output = subprocess.check_output(['lsof', '-p', str(pid)])
     lines = output.decode().strip().split('\n')
     return len(lines) - 1
-

@@ -209,6 +209,27 @@ def main():
     else:  # choose the model with the highest test acc
         accuracy = [float(re.findall("[0-9]\.[0-9]+", model_name)[0]) for model_name in available_model if
                     len(re.findall("[0-9]\.[0-9]+", model_name)) != 0]
+    use_loader = is_large(data) or args.use_loader
+    
+    if args.model=="GCN": 
+        model = pureGCN(dataset.num_features, args.hidden_channels, dataset.num_classes, args)
+    elif args.model=="SAGE":
+        model = pureSAGE(dataset.num_features, args.hidden_channels, dataset.num_classes)
+    elif args.model=="GIN":
+        model = pureGIN(data.x.shape[1], 2).to(device)
+
+    available_model = []
+    name_prefix = f"{args.dataset}_{args.model}_{args.aggr}"
+    for file in os.listdir("examples/trained_model") :
+        if re.match(name_prefix + "_[0-9]+_[0-1]\.[0-9]+\.pt", file) :
+            available_model.append(file)
+
+    if len(available_model) == 0 :  # no available model, train from scratch
+        print(f"No available model. Please run `python pure{args.model}.py --dataset {args.dataset} --aggr {args.aggr}`")
+
+    else :  # choose the model with the highest test acc
+        accuracy = [float(re.findall("[0-1]\.[0-9]+", model_name)[0]) for model_name in available_model if
+                    len(re.findall("[0-1]\.[0-9]+", model_name)) != 0]
         index_best_model = np.argmax(accuracy)
         model = load(model, available_model[index_best_model]).to(device)
 
@@ -234,6 +255,10 @@ def main():
             create_directory(out_folder)
             prefix = "_".join(
                 [args.model, args.dataset, args.aggr, str(args.perbatch), args.stream, args.loader])
+            timing_sampler(data, args)
+            out_folder = osp.join("examples", "timing_result", "affected")
+            create_directory(out_folder)
+            prefix = "_".join([args.model, args.dataset, args.aggr, str(args.perbatch), args.stream])
             log = open(osp.join(out_folder, f"{prefix}.log"), 'a')
             if args.perbatch >= 1:
                 batch_size = int(args.perbatch)
@@ -249,6 +274,9 @@ def main():
                 num_sample = max(10, num_sample//10)
             batch_inference_affected(
                 model, data, log, folder=intr_result_dir, egonet=args.binary, loader=args.loader, num_samples=num_sample)
+            intr_result_dir = osp.join("examples", "intermediate", args.dataset, "min", args.stream,
+                                       f"batch_size_{batch_size}")
+            batch_inference_affected(model, data, batch_size, log, folder=intr_result_dir, egonet=args.binary)
             log.close()
 
         # remove redundant saved models, only save the one with the highest accuracy
