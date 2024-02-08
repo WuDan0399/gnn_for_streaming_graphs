@@ -12,16 +12,17 @@ from get_intermediate_result import inference_for_intermediate_result
 # import multiprocessing as mp
 import torch.multiprocessing as mp
 from torch.multiprocessing import Pool
-
+import concurrent.futures
 
 class inkstream:
-    def __init__(self, model, folder: str = "", aggregator: str = "min", verify: bool = False, verification_tolerance: float = 1e-6, ego_net: bool = False, multi_thread: int = 0):
+    def __init__(self, model, folder: str = "", aggregator: str = "min", verify: bool = False, verification_tolerance: float = 1e-6, out_channels:int = 1, ego_net: bool = False, multi_thread: int = 0):
         self.model = model
         self.folder = folder
         self.aggregator = aggregator
         self.is_monotonic = True if aggregator in ["min", "max"] else False
         self.verify = verify
         self.verification_tolerance = verification_tolerance
+        self.out_channels = out_channels
         # if True, use ego networks. Else, use neighbourhood subgraphs.
         self.ego_net = ego_net
         self.multi_thread = multi_thread
@@ -93,10 +94,6 @@ class inkstream:
                     event_q.push_accumulative_event("update", dest, message_list[src])
 
     def load_context(self, data_dir: str, data: Data):
-        initial_edges = torch.load(
-            osp.join(data_dir, "initial_edges.pt"))
-        final_edges = torch.load(
-            osp.join(data_dir, "final_edges.pt"))
         inserted_edges, removed_edges = [], []
         if osp.exists(osp.join(data_dir, "inserted_edges.pt")):
             inserted_edges = torch.load(
@@ -112,10 +109,48 @@ class inkstream:
         if inserted_edges == [] and removed_edges == []:
             raise Exception("Problematic Data: no inserted or removed edges", data_dir)
 
-        init_out_edge_dict = to_dict(initial_edges)
-        init_in_edge_dict = to_dict(initial_edges[[1, 0], :])
-        final_out_edge_dict = to_dict(final_edges)
-        final_in_edge_dict = to_dict(final_edges[[1, 0], :])
+        final_edges = torch.load(osp.join(data_dir, "final_edges.pt"))
+        #initial_edges = torch.load(osp.join(data_dir, "initial_edges.pt"))
+        #tasks = [
+        #    (final_edges, data_dir, 'final_out_edge_dict.pickle'),
+        #    (final_edges[[1, 0], :], data_dir, "final_in_edge_dict.pickle"),
+        #    (initial_edges, data_dir, 'init_out_edge_dict.pickle'),
+        #    (initial_edges[[1, 0], :], data_dir, "init_in_edge_dict.pickle")
+        #]
+
+        #def execute_task(args):
+        #    edges, data_dir, filename = args
+        #    return to_dict_wiz_cache(edges, data_dir, filename)
+
+        ## Dictionary to store the results with keys to identify them
+        #results = {}
+
+        #with concurrent.futures.ThreadPoolExecutor() as executor:
+        #    # Creating a future to task mapping for identifying results later
+        #    future_to_task = {executor.submit(execute_task, task): task[2] for task in tasks}
+        #    for future in concurrent.futures.as_completed(future_to_task):
+        #        task_name = future_to_task[future]
+        #        try:
+        #            # Storing the result with the corresponding task name
+        #            results[task_name] = future.result()
+        #        except Exception as exc:
+        #            print(f'Task {task_name} generated an exception: {exc}')
+
+        # At this point, `results` dictionary contains the return values
+        # Access the results like so:
+        #final_out_edge_dict = results['final_out_edge_dict.pickle']
+        #final_in_edge_dict = results['final_in_edge_dict.pickle']
+        #init_out_edge_dict = results['init_out_edge_dict.pickle']
+        #init_in_edge_dict = results['init_in_edge_dict.pickle']
+
+        final_out_edge_dict = to_dict_wiz_cache(final_edges, data_dir, f'final_out_edge_dict.pickle')
+        final_in_edge_dict = to_dict_wiz_cache(final_edges[[1, 0], :], data_dir, f"final_in_edge_dict.pickle")
+        del final_edges
+        
+
+        initial_edges = torch.load(osp.join(data_dir, "initial_edges.pt"))
+        init_out_edge_dict = to_dict_wiz_cache(initial_edges, data_dir, f'init_out_edge_dict.pickle')
+        init_in_edge_dict = to_dict_wiz_cache(initial_edges[[1, 0], :], data_dir, f"init_in_edge_dict.pickle")
 
         # get Initial Result: either load from file, or run with full model inference.
         intm_initial = load_tensors_to_dict(
@@ -125,7 +160,74 @@ class inkstream:
             print("Running Inference for Theoretical Affected Area to Get Initial Result")
             intm_initial = self.intm_fetched(data, initial_edges, False, inserted_edges, removed_edges,
                                              init_in_edge_dict, final_in_edge_dict, init_out_edge_dict, final_out_edge_dict)
-        return final_edges, inserted_edges, removed_edges, init_in_edge_dict, init_out_edge_dict, final_in_edge_dict, final_out_edge_dict, intm_initial
+        # return final_edges, inserted_edges, removed_edges, init_in_edge_dict, init_out_edge_dict, final_in_edge_dict, final_out_edge_dict, intm_initial
+        return None, inserted_edges, removed_edges, init_in_edge_dict, init_out_edge_dict, final_in_edge_dict, final_out_edge_dict, intm_initial
+
+    def intm_fetched(self, data, edges, reuse: bool = True, inserted_edges=None, removed_edges=None, init_in_edge_dict=None, final_in_edge_dict=None, init_out_edge_dict=None, final_out_edge_dict=None):
+        # fake intermediate values, random tensor
+        if not reuse:
+            direct_affected_nodes = set([dst for _, dst in inserted_edges + removed_edges])
+            total_fetched_nodes = affected_nodes_each_layer([
+                init_out_edge_dict, init_in_edge_dict, final_out_edge_dict, final_in_edge_dict, ], direct_affected_nodes, depth=self.nlayer)
+            self.fetched_nodes = torch.LongTensor(
+                list(total_fetched_nodes[self.nlayer]))
+        access_nodes = torch.LongTensor(
+             list(total_fetched_nodes[self.nlayer-1]))
+        del data.x
+        # rename the keys for alignment
+        # GIN
+        intm = {}
+        intm[f"layer1"] = {"before": defaultdict(self.rand_tensor_128), "after": defaultdict(self.rand_tensor_128)}
+        for i in range(1, self.nlayer):
+                intm[f"layer{i + 1}"] = {"before": defaultdict(self.rand_tensor_64), "after": defaultdict(self.rand_tensor_64)}
+        for i in range(len(access_nodes)):
+            intm["layer1"]["before"][access_nodes[i].item()] = torch.rand(128)
+            intm["layer1"]["after"][access_nodes[i].item()] = torch.rand(128)
+            for j in range(1, self.nlayer):
+                intm[f"layer{j+1}"]["before"][access_nodes[i].item()] = torch.rand(64)
+                intm[f"layer{j+1}"]["after"][access_nodes[i].item()] = torch.rand(64)
+        # # for GCN and SAGE
+        # intm = {
+        #     f"layer{it_layer}": {
+        #         "before": {
+        #             self.fetched_nodes[i].item(): torch.rand(128 if it_layer == 1 else 64)  # cora for 70, papers 173 products 47
+        #             for i in range(len(self.fetched_nodes))
+        #         }, "after": {
+        #             self.fetched_nodes[i].item(): torch.rand(128 if it_layer == 1 else 64)
+        #             for i in range(len(self.fetched_nodes))
+        #         }, }
+        #     for it_layer in range(1, self.nlayer+1)
+        # }
+        # for GCN and SAGE
+        # intm = {}
+        # intm[f"layer1"] = {"before": defaultdict(self.rand_tensor_256),
+        #                    "after": defaultdict(self.rand_tensor_256)}
+        # intm[f"layer2"] = {"before": defaultdict(self.rand_tensor_class),
+        #                    "after": defaultdict(self.rand_tensor_class)}
+        # for i in range(len(access_nodes)):
+        #     intm["layer1"]["before"][access_nodes[i].item()] = torch.rand(256)
+        #     intm["layer1"]["after"][access_nodes[i].item()] = torch.rand(256)
+        #     intm["layer2"]["before"][access_nodes[i].item()] = self.rand_tensor_class()
+        #     intm["layer2"]["after"][access_nodes[i].item()] = self.rand_tensor_class()
+        # # for GCN and SAGE
+        # intm[f"layer1"] = {"before": defaultdict(self.rand_tensor_256),
+        #                    "after": defaultdict(self.rand_tensor_256)}
+        # intm[f"layer2"] = {"before": defaultdict(self.rand_tensor_class),
+        #                    "after": defaultdict(self.rand_tensor_class)}
+        # for GIN
+        # intm[f"layer1"] = {"before": defaultdict(self.rand_tensor_128), "after": defaultdict(self.rand_tensor_128)}
+        # for i in range(1, self.nlayer):
+        #         intm[f"layer{i + 1}"] = {"before": defaultdict(self.rand_tensor_64)ß, "after": defaultdict(self.rand_tensor_64)}
+        return intm
+
+    def rand_tensor_128(self,):
+        return torch.rand(128)
+    def rand_tensor_64(self,):
+        return torch.rand(64)
+    def rand_tensor_256(self,):
+        return torch.rand(256)
+    def rand_tensor_class(self,):
+        return torch.rand(self.out_channels)
 
     def intm_fetched(self, data, edges, reuse: bool = True, inserted_edges=None, removed_edges=None, init_in_edge_dict=None, final_in_edge_dict=None, init_out_edge_dict=None, final_out_edge_dict=None):
         if not reuse:
@@ -135,12 +237,42 @@ class inkstream:
             self.fetched_nodes = torch.LongTensor(
                 list(total_fetched_nodes[self.nlayer]))
 
-        data2 = data.clone()
-        data2.edge_index = edges
-        loader = data_loader(data2, num_layers=self.nlayer, num_neighbour_per_layer=-
-                             1, separate=False, input_nodes=self.fetched_nodes)
+        affected_nodes = torch.LongTensor(list(total_fetched_nodes[self.nlayer-1]))
+        data.edge_index = edges
+        loader = data_loader(data, num_layers=self.nlayer, num_neighbour_per_layer=-
+                             1, separate=False, input_nodes=affected_nodes)
         intm_raw = inference_for_intermediate_result(self.model, loader)
         # rename the keys for alignment
+        intm = {}
+        # for GCN and SAGE
+        # intm[f"layer1"] = {"before": defaultdict(self.rand_tensor_256),
+        #                          "after": defaultdict(self.rand_tensor_256)}
+        # intm[f"layer2"] = {"before": defaultdict(self.rand_tensor_class),
+        #                                "after": defaultdict(self.rand_tensor_class)}
+        # for GIN
+        intm[f"layer1"] = {"before": defaultdict(self.rand_tensor_128), "after": defaultdict(self.rand_tensor_128)}
+        for i in range(1, self.nlayer):
+                intm[f"layer{i + 1}"] = {"before": defaultdict(self.rand_tensor_64), "after": defaultdict(self.rand_tensor_64)}
+
+        for it_layer, value in intm_raw.items():
+            for i in range(len(affected_nodes)):
+                intm[it_layer]["before"][affected_nodes[i].item()] = value["a-"][i]
+                intm[it_layer]["after"][affected_nodes[i].item()] = value["a"][i]
+        return intm
+
+    def intm_fetched_ori(self, data, edges, reuse: bool = True, inserted_edges=None, removed_edges=None, init_in_edge_dict=None, final_in_edge_dict=None, init_out_edge_dict=None, final_out_edge_dict=None):
+        # slow but correct, can be used for verification
+        if not reuse:
+            direct_affected_nodes = set([dst for _, dst in inserted_edges + removed_edges])
+            total_fetched_nodes = affected_nodes_each_layer([
+                init_out_edge_dict, init_in_edge_dict, final_out_edge_dict, final_in_edge_dict, ], direct_affected_nodes, depth=self.nlayer)
+            self.fetched_nodes = torch.LongTensor(
+                list(total_fetched_nodes[self.nlayer]))
+
+        data.edge_index = edges
+        loader = data_loader(data, num_layers=self.nlayer, num_neighbour_per_layer=-
+                             1, separate=False, input_nodes=self.fetched_nodes)
+        intm_raw = inference_for_intermediate_result(self.model, loader)
         intm = {
             it_layer: {
                 "before": {
@@ -153,6 +285,7 @@ class inkstream:
             for it_layer, value in intm_raw.items()
         }
         return intm
+
 
     def verification(self, data, data_dir: str, final_edges, inserted_edges, removed_edges, init_out_edge_dict, final_out_edge_dict, intm_initial, cnt_dict):
         intm_final = load_tensors_to_dict(osp.join(self.folder, data_dir), skip=7, postfix="_final.pt"
@@ -216,7 +349,7 @@ class inkstream:
             changed_aggred_dst = torch.minimum(aggred_dst, aggregated_new_message)
             # changed_aggred_dst = self.inc_aggregator_pair(aggred_dst, aggregated_new_message)
             changed = not torch.equal(changed_aggred_dst, aggred_dst)
-            # changed = not torch.all(changed_aggred_dst == aggred_dst)
+            # changed = True
 
         else:
             aggregated_old_message = events["remove"]
@@ -267,14 +400,15 @@ class inkstream:
                 condition = "del_no_change"
                 if no_new_message:
                     # print(f"[no change for remove and no insert] {destination}")
+                    # changed = True
+                    # changed_aggred_dst = aggred_dst
                     changed = False
                     changed_aggred_dst = None
                 else:
                     # print(f"[no change for remove] incremental compute {destination}")
                     changed_aggred_dst = torch.minimum(aggred_dst, aggregated_new_message)
                     changed = not torch.equal(changed_aggred_dst, aggred_dst)
-                    # changed_aggred_dst = self.inc_aggregator_pair(aggred_dst, aggregated_new_message)
-                    # changed = not torch.all(changed_aggred_dst == aggred_dst)
+                    # changed = True
 
         return changed, changed_aggred_dst, condition
 
@@ -394,26 +528,30 @@ class inkstream:
             for entry in entries
             if entry.isdigit() and os.path.isdir(os.path.join(self.folder, entry))
         ]
-
-        for data_dir in tqdm(data_folders[:niters]):
-            try:
-                final_edges, inserted_edges, removed_edges, init_in_edge_dict, init_out_edge_dict, final_in_edge_dict, final_out_edge_dict, intm_initial = self.load_context(
-                    osp.join(self.folder, data_dir), data)
-            except Exception as e:
-                print(e)
-                continue
+        
+        # for data_dir in tqdm(data_folders[:niters]):
+        for data_dir in ["3"]:
+            # try:
+            _, inserted_edges, removed_edges, init_in_edge_dict, init_out_edge_dict, final_in_edge_dict, final_out_edge_dict, intm_initial = self.load_context(
+                osp.join(self.folder, data_dir), data)
+            # except Exception as e:
+            #     print(e)
+            #     continue
             cnt_dict, t_inc = self.incremental_inference_st(
                 init_out_edge_dict, init_in_edge_dict, final_out_edge_dict, final_in_edge_dict, intm_initial, inserted_edges, removed_edges)
             t_distribution.append(t_inc)
-            # print("inkstream time:", t_distribution)
+            print("inkstream time:", t_distribution)
 
             for it_layer in cnt_dict.keys():
                 condition_distribution[it_layer].append([
                     cnt_dict[it_layer]["computed"], cnt_dict[it_layer]["add_only"], cnt_dict[it_layer]["del_no_change"], cnt_dict[it_layer]["covered"], cnt_dict[it_layer]["recompute"]])
 
-            if self.verify:
-                self.verification(data, data_dir, final_edges, inserted_edges, removed_edges,
-                                  init_out_edge_dict, final_out_edge_dict, intm_initial, cnt_dict)
+            for it_layer in condition_distribution.keys():
+                np.save(f"tmp_GIN_layer{it_layer}.npy",condition_distribution[it_layer])
+
+            # if self.verify:
+            #     self.verification(data, data_dir, final_edges, inserted_edges, removed_edges,
+            #                       init_out_edge_dict, final_out_edge_dict, intm_initial, cnt_dict)
         print(f"inkstream time ({self.aggregator}):", t_distribution)
         return condition_distribution, t_distribution
 

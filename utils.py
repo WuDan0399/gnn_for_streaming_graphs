@@ -20,6 +20,7 @@ from torch.utils.data import DataLoader
 from torch_geometric.utils import k_hop_subgraph
 from torch_geometric.data import Data, Batch
 from configs import *
+import pickle
 
 np.random.seed(0)
 torch.manual_seed(0)
@@ -53,7 +54,7 @@ class FakeArgs:
         epochs=10,
         perbatch=1,
         stream="add",
-        interval=3000000,
+        interval=5000000,
         it=0,
         binary=False,
         mt=0,
@@ -365,7 +366,7 @@ def general_parser(parser: argparse.ArgumentParser) -> argparse.Namespace:
     parser.add_argument(
         "-pb",
         "--perbatch",
-        default=1,
+        default=100,
         type=float,
         help="percentage of edges loaded per batch. [0.0, 100.0]",
     )
@@ -528,14 +529,35 @@ def affected_nodes_each_layer(
     affected = defaultdict(set)
     affected[0] = set(srcs)
     for i in range(depth):
-        for node in affected[i]:
-            for edge_dict in edge_dicts:
-                affected[i + 1].update(edge_dict[node])
         affected[i + 1].update(srcs)  # srcs are affected each layer
         # for gin and sage, changes also propagate along self-loop.
         if self_loop:
             affected[i + 1].update(affected[i])
+        for node in affected[i]:
+            for edge_dict in edge_dicts:
+                affected[i + 1].update(edge_dict[node])
     return affected
+
+# def affected_nodes_each_layer(
+#     edge_dicts: List[Dict[int, torch.Tensor]],
+#     srcs: Union[list, set],
+#     depth: int,
+#     self_loop: bool = False,
+# ) -> defaultdict:
+#     affected = defaultdict(list)
+#     affected[0] = list(srcs)
+#     for i in range(depth):
+#         for src in srcs:
+#             affected[i + 1] = list(srcs)
+#         for node in affected[i]:
+#             # for gin and sage, changes also propagate along self-loop.
+#             if self_loop and (node not in affected[i + 1]):
+#                 affected[i + 1].append(node)
+#             for edge_dict in edge_dicts:
+#                 for nghbr in edge_dict[node]:
+#                     if nghbr not in affected[i + 1]:
+#                         affected[i + 1].append(nghbr)
+#     return affected
 
 
 def unique_and_location(
@@ -711,19 +733,32 @@ def create_directory(path):  # by chatgpt
     except FileExistsError:
         print(f"Directory '{path}' already exists.")
 
+def to_dict_wiz_cache(edges:torch.Tensor, dir, filename):
+    edge_dict_file_name = os.path.join(dir, filename)
+    if os.path.exists(edge_dict_file_name):
+        with open(edge_dict_file_name, 'rb') as file:
+            edge_dict = pickle.load(file)
+    else:
+        edge_dict = to_dict(edges)
+        with open(edge_dict_file_name, 'wb') as file:
+            pickle.dump(edge_dict, file)
+    print(f"Successfully build/load the {filename[:-7]} dict")
+    return edge_dict
 
 # @measure_time
 def to_dict(edges: torch.Tensor): # faster
-    from tqdm import tqdm
-    print("start building edge dict")
+    #from tqdm import tqdm
+    # print("start building edge dict")
     edge_dict = defaultdict(list)
     sources, destinations = edges[0].tolist(), edges[1].tolist()
-    pbar = tqdm(total=len(sources))
+    #pbar = tqdm(total=len(sources))
     for i, (source, dest) in enumerate(zip(sources, destinations)):
         edge_dict[source].append(dest)
-        if i % 1000000 == 0:
-            pbar.update(1000000)
-    pbar.close()
+    #    if i % 10000000 == 0:
+    #        pbar.update(10000000)
+    #pbar.close()
+    return edge_dict
+
 # def to_dict(edges: torch.Tensor):  # slower
 #     edge_dict = defaultdict(list)
 #     for i in range(edges.size(1)):

@@ -230,7 +230,7 @@ def load_dataset(args: argparse.Namespace, transform: Optional[Callable] = None)
         print("Processing: change to one-hot node attribute, generate fake labels")
         dataset = one_hot_fake_label(dataset, max_degree=500)
 
-    # generate_snapshots(dataset[0], args.dataset, args.stream, args)  # generate snapshots for the first(only) graph
+    #generate_snapshots(dataset[0], args.dataset, args.stream, args)  # generate snapshots for the first(only) graph
 
     return dataset
 

@@ -105,11 +105,9 @@ if __name__ == '__main__':
     dataset = load_dataset(args)
 
     data = dataset[0]
-    add_mask(data)
-    # timing_sampler(data, args)
+    # add_mask(data)
+    timing_sampler(data, args)
 
-    # kwargs = {'batch_size' : 1, 'num_workers' : 1, 'persistent_workers' : False}
-    # kwargs = {'batch_size': 16, 'num_workers': 4, 'persistent_workers': False}
 
     available_model = []
     name_prefix = f"{args.dataset}_GIN_{args.aggr}"

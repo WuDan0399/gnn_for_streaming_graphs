@@ -12,6 +12,7 @@ class inkstream_sage(inkstream):
         aggregator: str = "min",
         verify: bool = False,
         verification_tolerance: float = 1e-5,
+        out_channels: int = 1,
         ego_net: bool = False,
         multi_thread: int = 0
     ):
@@ -21,6 +22,7 @@ class inkstream_sage(inkstream):
             aggregator,
             verify,
             verification_tolerance,
+            out_channels,
             ego_net,
             multi_thread,
         )
@@ -80,11 +82,14 @@ def main():
     data = dataset[0]
     if args.dataset in ["uci", "dnc", "epi"]:
         model = SAGE(dataset.num_features, 256,256, args).to(device)
+        out_channels = 256
     else:
         if args.dataset == 'papers':
             model = SAGE(dataset.num_features, 256, dataset.num_classes + 1, args).to(device)
+            out_channels = dataset.num_classes + 1
         else:
             model = SAGE(dataset.num_features, 256, dataset.num_classes, args).to(device)
+            out_channels = dataset.num_classes
     model = load_available_model(model, args)
 
     if args.perbatch < 1:
@@ -111,10 +116,13 @@ def main():
     batch_sizes = defaultConfigs.batch_sizes
     num_samples = defaultConfigs.num_samples
     num_sample = num_samples[batch_sizes.index(batch_size)] if batch_size in batch_sizes else None
-
+    if args.dataset == "papers":
+        num_sample = 1
+    elif args.dataset == "products":
+        num_sample = min(num_sample, 10)
     if args.mt == 0:
         starter = inkstream_sage(model, intr_result_dir,
-                                 multi_thread=args.mt, aggregator=args.aggr, verify=False)
+                                 multi_thread=args.mt, aggregator=args.aggr, verify=False, out_channels=out_channels)
         condition_distribution, exec_time_dist = starter.batch_incremental_inference(data, niters=num_sample)
         unique_id = 0
         while osp.exists(osp.join(time_dir, f"SAGE_{args.dataset}_{args.aggr}_{args.stream}_batch_size_{batch_size}_{unique_id}.npy")):

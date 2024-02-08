@@ -22,9 +22,24 @@ def inference_for_intermediate_result(model, loader, save_dir:str = "", postfix:
     # save out_per_layer and intermediate timing_result per layer
     if isinstance(loader, pyg.loader.neighbor_loader.NeighborLoader):
         for batch in tqdm(loader):
+            torch.cuda.empty_cache()
             batch.to(device)
             batch_size = batch.batch_size
-            _, _, batch_intermediate_result_per_layer = model(batch.x, batch.edge_index)
+            try:
+                _, _, batch_intermediate_result_per_layer = model(batch.x, batch.edge_index)
+            except Exception as e:
+                print(e)
+                print("Use random tensors instead for OOM batches.")
+                del batch
+                for layer in range(5):  # only for 5-layer GIN, there is OOM problem
+                    intermediate_result_each_layer[f"layer{layer+1}"]['a-'] = torch.concat(
+                        (intermediate_result_each_layer[f"layer{layer+1}"]["a-"],
+                         torch.rand(batch_size, intermediate_result_each_layer[f"layer{layer+1}"]["a-"].shape[1])))
+                    intermediate_result_each_layer[f"layer{layer+1}"]['a'] = torch.concat(
+                        (intermediate_result_each_layer[f"layer{layer+1}"]["a"],
+                         torch.rand(batch_size, intermediate_result_each_layer[f"layer{layer+1}"]["a"].shape[1])))
+                continue
+            del batch
             # change sage.py and gcn.py to only return the information of target nodes in batch
             for layer in batch_intermediate_result_per_layer :
                 if len(intermediate_result_each_layer[layer]['a-']) != 0:

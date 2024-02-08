@@ -59,9 +59,9 @@ def intm_affected(model, data, edges, nlayer: int = 2, inserted_edges=None, remo
 
     # data2 = data.clone()
     # data2.edge_index = edges
-    print(f"former edges {data.edge_index.shape[1]}")
+    # print(f"former edges {data.edge_index.shape[1]}")
     data.edge_index = edges
-    print(f"current edges {data.edge_index.shape[1]}")
+    # print(f"current edges {data.edge_index.shape[1]}")
     loader = data_loader(data, num_layers=nlayer, num_neighbour_per_layer=-1, separate=False,
                          input_nodes=affected_nodes)
     intm_raw = inference_for_intermediate_result(model, loader)
@@ -229,7 +229,7 @@ if __name__ == '__main__':
                 notsure += 1  # not sure whether changed
             else:
                 if not torch.all(torch.isclose(intm_before[f"layer{depth}"]["after"][node],
-                                               intm_after[f"layer{depth}"]["after"][node], atol=1e-6)):
+                                               intm_after[f"layer{depth}"]["after"][node])):
                     changed += 1
         print(f"Total/changed/notsure: {total_nodes}/{changed}/{notsure}")
         total_all_cases.append(total_nodes)

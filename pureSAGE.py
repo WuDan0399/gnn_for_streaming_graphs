@@ -94,9 +94,8 @@ def main():
     dataset = load_dataset(args)
     # print_dataset(dataset)
     data = dataset[0]
-    # timing_sampler(data, args)
-    add_mask(data)
-    # print_data(data)
+    timing_sampler(data, args)
+    # add_mask(data)
 
     if args.dataset == 'papers':
         model = pureSAGE(dataset.num_features, 256, dataset.num_classes+1, args).to(device)
