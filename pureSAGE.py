@@ -18,15 +18,14 @@ class pureSAGE(torch.nn.Module):
         self.convs.append(SAGEConv(hidden_channels, out_channels, aggr=args.aggr))
 
     def forward(self, x, edge_index):
-        if isinstance(edge_index, list):  # used for quiver loader
+        if isinstance(edge_index, list): 
             for i, (graph_edge_index, _, size) in enumerate(edge_index):
-                # x_target = x[:size[1]]  # Target nodes are always placed first.
                 x = self.convs[i](x, graph_edge_index)
                 if i < len(self.convs) - 1:
                     x = F.relu(x)
                     x = F.dropout(x, p=0.5, training=self.training)
             return x
-        else:  # edge_index is torch_sparse.SparseTensor, torch.Tensor, or torch.sparse.Tensor
+        else: 
             for i, conv in enumerate(self.convs):
                 x = conv(x, edge_index)
                 if i < len(self.convs) - 1:
@@ -44,10 +43,8 @@ def train(model, train_loader, optimizer, epoch):
         y = batch.y[:batch.batch_size].to(device)
         y_hat = model(batch.x.to(device), batch.edge_index.to(device))[:batch.batch_size]
         if len(batch.y.shape) == 1:
-            # out = out.argmax(dim=-1).float()
             y = torch.nn.functional.one_hot(y.long(), num_classes=y_hat.shape[1]).float()
-        elif batch.y.shape[1] == 1: # 2d array but 1 element in each row.
-            # out = out.argmax(dim=-1).reshape((-1,1)).float()
+        elif batch.y.shape[1] == 1: 
             y = torch.nn.functional.one_hot(y.long().flatten(), num_classes=y_hat.shape[1]).float()
         loss = F.cross_entropy(y_hat, y.float())
         loss.backward()
@@ -65,37 +62,31 @@ def test(model, loader):
     total_examples = 0
     total_correct = 0
     for batch in tqdm(loader):
-    # for batch in loader:
         batch_size = batch.batch_size
         out = model(batch.x.to(device), batch.edge_index.to(device))[
             :batch.batch_size]
         batch_y = batch.y[:batch_size].to(device)
-        if len(batch_y.shape) == 1:  # single label classification
-            pred = out.argmax(dim=-1)  # one-hot
+        if len(batch_y.shape) == 1: 
+            pred = out.argmax(dim=-1)
             total_correct += int((pred[:batch_size] == batch_y).sum())
             total_examples += batch_size
-        elif batch_y.shape[1] == 1:  # single label classification
-            pred = out.argmax(dim=-1)  # one-hot
+        elif batch_y.shape[1] == 1: 
+            pred = out.argmax(dim=-1)
             total_correct += int((pred[:batch_size] == batch_y.flatten()).sum())
             total_examples += batch_size
-        else:  # multi-label classification
+        else:  
             pred = (out > 1).float()
-            # element-wise compare for each task.
             total_correct += int((pred[:batch_size] == batch_y).sum())
-            # classification for each task
             total_examples += batch_size * batch_y.shape[1]
     return total_correct / total_examples
 
 
 def main():
-    # args = FakeArgs(dataset="papers", aggr='min')
     parser = argparse.ArgumentParser()
     args = general_parser(parser)
     dataset = load_dataset(args)
-    # print_dataset(dataset)
     data = dataset[0]
     timing_sampler(data, args)
-    # add_mask(data)
 
     if args.dataset == 'papers':
         model = pureSAGE(dataset.num_features, 256, dataset.num_classes+1, args).to(device)
@@ -110,7 +101,7 @@ def main():
         if re.match(name_prefix + "_[0-9]+_[0-9]\.[0-9]+\.pt", file):
             available_model.append(file)
 
-    if len(available_model) == 0:  # no available model, train from scratch
+    if len(available_model) == 0:
         best_test_acc = 0
         best_loss = torch.nan
         best_model_state_dict = None
@@ -123,8 +114,6 @@ def main():
             print(f'Epoch {epoch:02d}, Loss: {loss:.4f}')
             test_acc = test(model, test_loader)
             print(f'Epoch: {epoch:02d}, Test: {test_acc:.4f}')
-            # if best_test_acc < test_acc:
-            #     best_test_acc = test_acc
             if epoch == 1 or best_loss > loss:
                 best_loss = loss
                 best_model_state_dict = model.state_dict()
@@ -133,13 +122,11 @@ def main():
                 it_patience = it_patience+1
                 if it_patience >= patience:
                     print(
-                        # f"No accuracy improvement {best_test_acc} in {patience} epochs. Early stopping.")
                         f"No accuracy improvement {best_loss} in {patience} epochs. Early stopping.")
                     break
         save(best_model_state_dict, epoch, best_loss, name_prefix)
-        # save(best_model_state_dict, epoch, best_test_acc, name_prefix)
 
-    else:  # choose the model with the highest test acc
+    else: 
         accuracy = [float(re.findall("[0-9]\.[0-9]+", model_name)[0]) for model_name in available_model if
                     len(re.findall("[0-9]\.[0-9]+", model_name)) != 0]
         index_best_model = np.argmax(accuracy)
@@ -148,7 +135,6 @@ def main():
         if args.dataset in ['papers', "products"]:
             num_eval_nodes = 100000
             node_indices = torch.randperm(data.num_nodes)[:num_eval_nodes]
-            # loader = EgoNetDataLoader(data, node_indices, **kwargs)
             loader = data_loader(data, num_layers=2, num_neighbour_per_layer=-1,
                                  separate=False, input_nodes=node_indices)
             start = time.perf_counter()
@@ -168,8 +154,6 @@ def main():
 
             print(
                 f'Full Graph. Inference time: {(end - start)/num_iter:.4f} seconds, averaged for {num_iter} iterations.')
-        available_model.pop(index_best_model)
-        clean(available_model)
 
 
 if __name__ == '__main__':

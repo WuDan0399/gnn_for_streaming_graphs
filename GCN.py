@@ -23,18 +23,17 @@ class GCN(torch.nn.Module) :
                              normalize=False, aggr=args.aggr, save_intermediate=args.save_int)
 
     def forward(self, x, edge_index, edge_weight=None):
-        # 把timing 扔到 intermediate_result_per_layer, intermediate_result 里面
         out_per_layer = {}
         intermediate_result_per_layer = {}
 
         if self.save_int:
             out_per_layer["input"] = x.detach()
 
-        x = F.dropout(x, p=0.5, training=self.training)   # prevent overfitting, cannot sparsify the input\network for inference
+        x = F.dropout(x, p=0.5, training=self.training)   
         x, intermediate_result = self.conv1(x, edge_index, edge_weight)
         x = x.relu()
 
-        intermediate_result_per_layer["layer1"] = intermediate_result  # must contains time info, could contain intermediate
+        intermediate_result_per_layer["layer1"] = intermediate_result 
         out_per_layer["conv1"] = x.detach()
 
         x = F.dropout(x, p=0.5, training=self.training)
@@ -102,7 +101,7 @@ def main():
     optimizer = torch.optim.Adam([
         dict(params=model.conv1.parameters(), weight_decay=5e-4),
         dict(params=model.conv2.parameters(), weight_decay=0)
-    ], lr=args.lr)  # Only perform weight-decay on first convolution.
+    ], lr=args.lr)  
 
     available_model = []
     name_prefix = f"{args.dataset}_GCN_{args.aggr}"
@@ -144,7 +143,6 @@ def main():
         print(f"Test: {test_acc:.4f}")
 
         available_model.pop(index_best_model)
-        clean(available_model)
 
 
 if __name__ == "__main__":

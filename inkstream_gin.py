@@ -27,7 +27,6 @@ class inkstream_gin(inkstream):
             ego_net,
             multi_thread,
         )
-        # manually change the model_config, remove any operation before 1st aggregation function.
         self.model_config = [
             [self.aggregator, "user_apply", lambda x: self.model.convs[0].nn(x).relu()],
             [self.aggregator, "user_apply", lambda x: self.model.convs[1].nn(x).relu()],
@@ -46,7 +45,7 @@ class inkstream_gin(inkstream):
     ):
         if (
             "user" not in events.keys()
-        ):  # left side (aggregated value) changes, right side (h_u) remains the same
+        ): 
             right_side = intm_initial[f"layer{it_layer+1}"]["before"][node].to(
                 device)
         else:
@@ -58,10 +57,9 @@ class inkstream_gin(inkstream):
         return messages
 
     def user_propagate(self, node: int, value: torch.Tensor, event_queue: EventQueue):
-        # chane to (\eps+1)*value if \eps not equal to 0
         event_queue.push_user_event("user", node, value)
 
-    def inc_aggregator_pair(self, message_a, message_b):  # for min/max
+    def inc_aggregator_pair(self, message_a, message_b): 
         return torch.maximum(message_a, message_b)
 
     def inc_aggregator(self, message_list: torch.Tensor):
@@ -80,8 +78,6 @@ def main():
     dataset = load_dataset(args)
     data = dataset[0]
     if args.dataset in ["uci", "dnc", "epi"]:
-        # WARNING: should not support and report as dynamic dataset has no label.
-        # So the trained weights are dummy, leading to pure random neighborhood contribution.
         model = GIN(dataset.num_features, 256, 256, args).to(device)
         out_channels = 256
     else:
@@ -94,7 +90,6 @@ def main():
     model = load_available_model(model, args)
 
     if args.perbatch < 1:
-        # perbatch is [x]%, so divide by 100
         batch_size = int(args.perbatch / 100 * data.num_edges)
     else:
         batch_size = int(args.perbatch)

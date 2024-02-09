@@ -29,13 +29,10 @@ def train(model, train_loader, optimizer) :
         batch = batch.to(device, 'x', 'y', 'edge_index')
         batch_size = batch.batch_size
         out = model(batch.x, batch.edge_index)
-        # classification task with 1 scalar label, cannot be used in training
         y = batch.y[:batch_size]
         if len(batch.y.shape) == 1:
-            # out = out.argmax(dim=-1).float()
             y = torch.nn.functional.one_hot(y.long(), num_classes=out.shape[1]).float()
-        elif batch.y.shape[1] == 1: # 2d array but 1 element in each row.
-            # out = out.argmax(dim=-1).reshape((-1,1)).float()
+        elif batch.y.shape[1] == 1: 
             y = torch.nn.functional.one_hot(y.long().flatten(), num_classes=out.shape[1]).float()
         loss = F.cross_entropy(out[:batch_size], y.float())
         loss.backward()
@@ -51,7 +48,6 @@ def train(model, train_loader, optimizer) :
 def test(model, loader):
     model.eval()
     total_examples = total_correct = 0
-    print(len(iter(loader)))
     for batch in tqdm(loader):
         batch = batch.to(device)
         batch_size = batch.batch_size
@@ -67,9 +63,7 @@ def test(model, loader):
             total_examples += batch_size
         else:  # multi-label classification
             pred = (out > 1).float()
-            # element-wise compare for each task.
             total_correct += int((pred[:batch_size] == batch_y).sum())
-            # classification for each task
             total_examples += batch_size * batch_y.shape[1]
     return total_correct / total_examples
 
@@ -83,7 +77,6 @@ def test_w_profiler(model, loader):
             schedule=torch.profiler.schedule(wait=10, warmup=10, active=1000, repeat=1),
             on_trace_ready=torch.profiler.tensorboard_trace_handler('./log'),
             activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-            # with_stack=True,
             profile_memory=True
     ) as prof:
         print(f"Loader iterations: {len(loader)}")
@@ -117,30 +110,21 @@ def test_w_profiler(model, loader):
             prof.step()  # Call this at the end of each step to record stats for the step
 
     print(prof.key_averages().table())
-    # After profiling, analyze the results.
     for avg in prof.key_averages():
         print(f"{avg.key}: {avg.cpu_time_total}")
         print(f"{avg.key}: {avg.cuda_time_total}")
 
-    # print(prof.key_averages().table())
-    # save results to a file
-    # prof.export_chrome_trace("trace.json")
-
     return total_correct / total_examples
 
 def main():
-    # args = FakeArgs(dataset="products", aggr='min')
     parser = argparse.ArgumentParser()
     args = general_parser(parser)
     print("try load dataset")
     dataset = load_dataset(args)
 
-    # print_dataset(dataset)
     data = dataset[0]
     add_mask(data)
 
-    # print_data(data)
-    # timing_sampler(data, args)
     train_loader, val_loader, test_loader = data_loader(data, num_layers=2, num_neighbour_per_layer=10, separate=True)
     torch.where(data.test_mask == True)
     if args.dataset == 'papers':
@@ -182,7 +166,6 @@ def main():
     else :  # choose the model with the highest test acc
         print("Inference with full graph as input.")
         if args.interval > 0:
-            # timing_sampler(data, args)  # get the latest 'interval' edges for inference.
             print(f"Num Edges: {data.num_edges}")
         else:
             print("Disable edge sampling according to creation time.")

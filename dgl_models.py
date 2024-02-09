@@ -20,7 +20,6 @@ from sklearn.model_selection import StratifiedKFold
 from torch.utils.data.sampler import SubsetRandomSampler
 
 from ogb.nodeproppred import DglNodePropPredDataset
-# from utils import *   WARNING: cannot add this line, will lead to TypeError: __init__() missing 1 required positional argument: 'sizes'
 import os.path as osp
 import re
 import time
@@ -33,7 +32,6 @@ class SAGE(nn.Module):
     def __init__(self, in_size, hid_size, out_size):
         super().__init__()
         self.layers = nn.ModuleList()
-        # three-layer GraphSAGE-mean
         self.layers.append(dglnn.SAGEConv(in_size, hid_size, "mean"))
         self.layers.append(dglnn.SAGEConv(hid_size, out_size, "mean"))
         self.dropout = nn.Dropout(0.5)
@@ -61,7 +59,7 @@ class SAGE(nn.Module):
             batch_size=batch_size,
             shuffle=False,
             drop_last=False,
-            num_workers=num_worker,  # num_worker,leads to error https://github.com/pyg-team/pytorch_geometric/issues/1274
+            num_workers=num_worker,  
         )
         buffer_device = torch.device("cpu")
         pin_memory = buffer_device != device
@@ -74,17 +72,16 @@ class SAGE(nn.Module):
                 device=buffer_device,
                 pin_memory=pin_memory,
             )
-            feat = feat.to(device)  # can fail for papers 100M
+            feat = feat.to(device) 
             for input_nodes, output_nodes, blocks in tqdm.tqdm(dataloader):
                 input_nodes.to(device)
                 output_nodes.to(device)
                 blocks[0].to(device)
                 x = feat[input_nodes]
-                h = layer(blocks[0], x)  # len(blocks) = 1
+                h = layer(blocks[0], x) 
                 if l != len(self.layers) - 1:
                     h = F.relu(h)
                     h = self.dropout(h)
-                # by design, our output nodes are contiguous
                 y[output_nodes[0] : output_nodes[-1] + 1] = h.to(buffer_device)
             feat = y
         return y
@@ -94,7 +91,6 @@ class GCN(nn.Module):
     def __init__(self, in_size, hid_size, out_size):
         super().__init__()
         self.layers = nn.ModuleList()
-        # two-layer GCN
         self.layers.append(
             dglnn.GraphConv(in_size, hid_size, activation=F.relu)
         )
@@ -124,7 +120,7 @@ class GCN(nn.Module):
             batch_size=batch_size,
             shuffle=False,
             drop_last=False,
-            num_workers=num_worker,  # num_worker,leads to error https://github.com/pyg-team/pytorch_geometric/issues/1274
+            num_workers=num_worker, 
         )
         buffer_device = torch.device("cpu")
         pin_memory = buffer_device != device
@@ -137,17 +133,16 @@ class GCN(nn.Module):
                 device=buffer_device,
                 pin_memory=pin_memory,
             )
-            feat = feat.to(device)  # can fail for papers 100M
+            feat = feat.to(device)  
             for input_nodes, output_nodes, blocks in tqdm.tqdm(dataloader):
                 input_nodes.to(device)
                 output_nodes.to(device)
                 blocks[0].to(device)
                 x = feat[input_nodes]
-                h = layer(blocks[0], x)  # len(blocks) = 1
+                h = layer(blocks[0], x) 
                 if l != len(self.layers) - 1:
                     h = F.relu(h)
                     h = self.dropout(h)
-                # by design, our output nodes are contiguous
                 y[output_nodes[0] : output_nodes[-1] + 1] = h.to(buffer_device)
             feat = y
         return y
@@ -158,7 +153,6 @@ class MLP(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim):
         super().__init__()
         self.linears = nn.ModuleList()
-        # two-layer MLP
         self.linears.append(nn.Linear(input_dim, hidden_dim, bias=False))
         self.linears.append(nn.Linear(hidden_dim, output_dim, bias=False))
 
@@ -173,7 +167,6 @@ class GIN(nn.Module):
         super().__init__()
         self.layers = nn.ModuleList()
         num_layers = 5
-        # five-layer GCN with two-layer MLP aggregator and sum-neighbor-pooling scheme
         for layer in range(num_layers):
             if layer == 0:
                 mlp = MLP(input_dim, hid_size, hid_size)
@@ -183,7 +176,7 @@ class GIN(nn.Module):
                 mlp = MLP(hid_size, hid_size, hid_size)
             self.layers.append(
                 GINConv(mlp, learn_eps=False)
-            )  # set to True if learning epsilon
+            ) 
         self.dropout = nn.Dropout(0.5)
         self.hid_size = hid_size
         self.out_size = out_size
@@ -209,7 +202,7 @@ class GIN(nn.Module):
             batch_size=batch_size,
             shuffle=False,
             drop_last=False,
-            num_workers=num_worker,  # num_worker,leads to error https://github.com/pyg-team/pytorch_geometric/issues/1274
+            num_workers=num_worker, 
         )
         buffer_device = torch.device("cpu")
         pin_memory = buffer_device != device
@@ -222,17 +215,16 @@ class GIN(nn.Module):
                 device=buffer_device,
                 pin_memory=pin_memory,
             )
-            feat = feat.to(device)  # can fail for papers 100M
+            feat = feat.to(device)  
             for input_nodes, output_nodes, blocks in tqdm.tqdm(dataloader):
                 input_nodes.to(device)
                 output_nodes.to(device)
                 blocks[0].to(device)
                 x = feat[input_nodes]
-                h = layer(blocks[0], x)  # len(blocks) = 1
+                h = layer(blocks[0], x)  
                 if l != len(self.layers) - 1:
                     h = F.relu(h)
                     h = self.dropout(h)
-                # by design, our output nodes are contiguous
                 y[output_nodes[0] : output_nodes[-1] + 1] = h.to(buffer_device)
             feat = y
         return y
@@ -262,7 +254,7 @@ def layerwise_infer(device, graph, nid, model, num_classes):  # full graph infer
         start = time.perf_counter()
         pred = model.inference(
             graph, device, batch_size, num_worker
-        )  # pred in buffer_device
+        ) 
         print(f"Inference time: {time.perf_counter()-start} seconds.")
         pred = pred[nid]
         label = graph.ndata["label"][nid].to(pred.device)
@@ -277,7 +269,7 @@ def mini_batch_infer(device, graph, nid, model, num_classes):
     batch_size = loader_configs["batch_size"]
     num_worker = loader_configs["num_workers"]
     sampler = NeighborSampler(
-        [-1, -1],  # fanout for [layer-0, layer-1, layer-2]
+        [-1, -1], 
         prefetch_node_feats=["feat"],
         prefetch_labels=["label"],
     )
@@ -300,11 +292,10 @@ def mini_batch_infer(device, graph, nid, model, num_classes):
         )
 
 def train(args, device, g, dataset, model, num_classes):
-    # create sampler & dataloader
     train_idx = dataset.train_idx.to(device)
     val_idx = dataset.val_idx.to(device)
     sampler = NeighborSampler(
-        [10, 10],  # fanout for [layer-0, layer-1, layer-2]
+        [10, 10],  
         prefetch_node_feats=["feat"],
         prefetch_labels=["label"],
     )
@@ -359,14 +350,13 @@ def train(args, device, g, dataset, model, num_classes):
 
 
 if __name__ == "__main__":
-    no_load = True  # no need to use a trained model. Use randomly initialized weights for inference.
+    no_load = True  
     parser = argparse.ArgumentParser()
     args = general_parser(parser)
     if not torch.cuda.is_available():
         args.mode = "cpu"
     print(f"Using {args.mode} mode.")
 
-    # load and preprocess dataset
     print("Loading data")
     dataset = load_dataset_dgl(args)
     g = dataset[0]
@@ -374,7 +364,6 @@ if __name__ == "__main__":
     num_classes = dataset.num_classes
     device = torch.device("cpu" if args.mode == "cpu" else "cuda")
 
-    # create GraphSAGE model
     num_nodes = g.ndata["feat"].shape[0]
     in_size = g.ndata["feat"].shape[1]
     out_size = dataset.num_classes
@@ -399,31 +388,18 @@ if __name__ == "__main__":
             available_model.append(file)
 
     if no_load == False and len(available_model) == 0:  # no available model, train from scratch
-        # model training
         print("Training...")
         acc = train(args, device, g, dataset, model, num_classes)
         save(model.state_dict(), args.epochs, acc, name_prefix)
-        # # test the model
-        # print("Testing...")
-        # acc = layerwise_infer(
-        #     device, g, dataset.test_idx, model, num_classes
-        # )
-        # print("Test Accuracy {:.4f}".format(acc.item()))
-
     else:  # load the model, then inference
         if no_load:
             print("use random initialized weights")
         else:
             print("loading model ", available_model[0])
             model = load(model, available_model[0])
-        # test the model
         timing_sampler(g, args)
         g = dgl.add_self_loop(g)
-        print("number edges after sampling and adding self-loop", g.num_edges())
         print("Inference for whole graph...")
-        # acc = mini_batch_infer(
-        #     device, g, range(num_nodes), model, num_classes
-        # )
         acc = layerwise_infer(
             device, g, range(num_nodes), model, num_classes
         )

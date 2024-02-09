@@ -27,7 +27,6 @@ class inkstream_gcn(inkstream):
             ego_net,
             multi_thread,
         )
-        # manually change the model_config, remove any operation before 1st aggregation function.
         self.model_config = [
             [self.aggregator, self.conv1_bias, self.conv2],
             [self.aggregator, self.conv2_bias],
@@ -77,7 +76,7 @@ def main():
         "examples",
         "intermediate",
         args.dataset,
-        "min",  # args.aggr,
+        "min", 
         args.stream,
         f"batch_size_{batch_size}",
     )

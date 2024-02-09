@@ -9,9 +9,7 @@ import pickle
 def get_direct_affected_tensor(inserted_edges: torch.tensor, removed_edges: torch.tensor) -> set:
     dest_add = torch.unique(inserted_edges[1, :])
     dest_rm = torch.unique(removed_edges[1, :])
-    # Concatenate and find unique values across both tensors
     all_unique = torch.unique(torch.cat((dest_add, dest_rm)))
-    # Convert to a set of integers
     direct_affected_nodes = set(all_unique.tolist())
     return direct_affected_nodes
 
@@ -24,7 +22,6 @@ def inference_for_intermediate_result(model, loader):
         batch = batch.to(device)
         batch_size = batch.batch_size
         _, _, batch_intermediate_result_per_layer = model(batch.x, batch.edge_index)
-        # change sage.py and gcn.py to only return the information of target nodes in batch
         for layer in batch_intermediate_result_per_layer:
             if len(intermediate_result_each_layer[layer]['a-']) != 0:
                 intermediate_result_each_layer[layer]['a-'] = torch.concat((intermediate_result_each_layer[layer]["a-"],
@@ -46,26 +43,19 @@ def inference_for_intermediate_result(model, loader):
 
 def intm_affected(model, data, edges, nlayer: int = 2, inserted_edges=None, removed_edges=None, init_in_edge_dict=None,
                   final_in_edge_dict=None, init_out_edge_dict=None, final_out_edge_dict=None) -> Tuple[dict, set]:
-    if isinstance(inserted_edges, torch.Tensor):  # full graph, only use one dict
+    if isinstance(inserted_edges, torch.Tensor): 
         direct_affected_nodes = get_direct_affected_tensor(inserted_edges, removed_edges)
-    else:  # sampled graph
+    else:
         direct_affected_nodes = set([dst for _, dst in inserted_edges + removed_edges])
     dicts = [i for i in [init_out_edge_dict, init_in_edge_dict, final_out_edge_dict, final_in_edge_dict] if i != None]
-    # total_fetched_nodes = affected_nodes_each_layer(dicts, direct_affected_nodes, depth=nlayer)
-    # fetched_nodes = torch.LongTensor(list(total_fetched_nodes[nlayer]))
     total_affected_nodes = affected_nodes_each_layer(dicts, direct_affected_nodes, depth=nlayer - 1)
     affected_nodes = torch.LongTensor(list(total_affected_nodes[nlayer - 1]))
     print(f"total affected nodes: {len(affected_nodes)}")
 
-    # data2 = data.clone()
-    # data2.edge_index = edges
-    # print(f"former edges {data.edge_index.shape[1]}")
     data.edge_index = edges
-    # print(f"current edges {data.edge_index.shape[1]}")
     loader = data_loader(data, num_layers=nlayer, num_neighbour_per_layer=-1, separate=False,
                          input_nodes=affected_nodes)
     intm_raw = inference_for_intermediate_result(model, loader)
-    # rename the keys for alignment
     intm = {
         it_layer: {
             "before": {
@@ -77,7 +67,7 @@ def intm_affected(model, data, edges, nlayer: int = 2, inserted_edges=None, remo
             }, }
         for it_layer, value in intm_raw.items()
     }
-    return intm, total_affected_nodes[nlayer - 1]  # id of affected nodes
+    return intm, total_affected_nodes[nlayer - 1] 
 
 
 if __name__ == '__main__':
@@ -86,8 +76,6 @@ if __name__ == '__main__':
 
     create_directory(osp.join("examples", "theoretical"))
 
-    # args = FakeArgs(dataset="products", aggr="min", perbatch=100,
-    #                 stream="mix", model="GCN", save_int=True)
     parser = argparse.ArgumentParser()
     args = general_parser(parser)
     dataset = load_dataset(args)
@@ -96,14 +84,12 @@ if __name__ == '__main__':
     batch_sizes = defaultConfigs.batch_sizes
     num_samples = defaultConfigs.num_samples
     num_sample = num_samples[batch_sizes.index(batch_size)] if batch_size in batch_sizes else None
-    # for products and papers, too large
     num_sample = 5
 
     data = dataset[0]
-    # edge_dict_full = to_dict(data.edge_index)  # for full graph
     f = open(osp.join("examples", "theoretical", f"2layerGCN_affected_vs_real_{args.dataset}_{batch_size}.txt"), "w")
     f.write(
-        f"batch_size\t#layer\texample_id\tth_affected_nodes(sampled)\treal_affected_nodes(sampled)\tnot_sure_nodes(sampled)\n")
+        f"batch_size\t#layer\texample_id\tth_affected_nodes(sampled)\treal_affected_nodes(sampled)\n")
 
     if args.dataset == 'papers':
         model = GCN(dataset.num_features, 256, dataset.num_classes + 1, args).to(device)
@@ -115,7 +101,7 @@ if __name__ == '__main__':
     for file in os.listdir("examples/trained_model"):
         if re.match(name_prefix + "_[0-9]+_[0-9]\.[0-9]+\.pt", file):
             available_model.append(file)
-    if len(available_model) == 0:  # no available model, train from scratch
+    if len(available_model) == 0:
         print("no trained model")
     else:
         model = load(model, available_model[0])
@@ -136,7 +122,6 @@ if __name__ == '__main__':
     else:
         print("Use snapshots with randomly removed edges of full graph")
         all_edges = data.edge_index
-        # Assuming your defaultdict is named my_defaultdict
         edge_dict_file_name = f'{args.dataset}_full_dict.pickle'
         if os.path.exists(edge_dict_file_name):
             with open(edge_dict_file_name, 'rb') as file:
@@ -145,20 +130,12 @@ if __name__ == '__main__':
             edge_dict_full = to_dict(data.edge_index)
             with open(edge_dict_file_name, 'wb') as file:
                 pickle.dump(edge_dict_full, file)
-        print("Successfully build/load the edge_index dict")
 
-    # for data_dir in pbar:
     for data_dir in data_folders:
-        # failed_cases = ["6", "2",]
-        # if data_dir in failed_cases:
-        #     continue
-        # pbar.set_description('Processing ' + str(batch_size))
         try:
             if use_sampled_graph:
-                print(f"Processing dir {data_dir}")
                 case_id += 1
-                print(f"Iteration {case_id}/{num_sample}")
-                initial_edges = torch.load(osp.join(folder, data_dir, "initial_edges.pt"))  # for sampled graph
+                initial_edges = torch.load(osp.join(folder, data_dir, "initial_edges.pt")) 
                 final_edges = torch.load(osp.join(folder, data_dir, "final_edges.pt"))
                 inserted_edges, removed_edges = [], []
                 if osp.exists(osp.join(folder, data_dir, "inserted_edges.pt")):
@@ -168,7 +145,6 @@ if __name__ == '__main__':
                 if osp.exists(osp.join(folder, data_dir, "removed_edges.pt")):
                     removed_edges = torch.load(osp.join(folder, data_dir, "removed_edges.pt"))
                     removed_edges = [(src.item(), dst.item()) for src, dst in zip(removed_edges[0], removed_edges[1])]
-                # Assuming your defaultdict is named my_defaultdict
                 edge_dict_file_name = f'{args.dataset}_{data_dir}_dict.pickle'
                 if os.path.exists(edge_dict_file_name):
                     with open(edge_dict_file_name, 'rb') as file:
@@ -177,7 +153,6 @@ if __name__ == '__main__':
                     init_out_edge_dict_sampled = to_dict(initial_edges)
                     with open(edge_dict_file_name, 'wb') as file:
                         pickle.dump(init_out_edge_dict_sampled, file)
-                print(f"Successfully build/load the init_out_edge_dict_sampled dict.")
                 final_edge_dict_file_name = f'{args.dataset}_{data_dir}_final_dict.pickle'
                 if os.path.exists(final_edge_dict_file_name):
                     with open(final_edge_dict_file_name, 'rb') as file:
@@ -186,7 +161,6 @@ if __name__ == '__main__':
                     final_out_edge_dict_sampled = to_dict(final_edges)
                     with open(final_edge_dict_file_name, 'wb') as file:
                         pickle.dump(final_out_edge_dict_sampled, file)
-                print(f"Successfully build/load the final_out_edge_dict_sampled dict.")
                 direct_affected_nodes = set([dst for _, dst in inserted_edges + removed_edges])
                 intm_before, affected_before = intm_affected(model, data, initial_edges, 2, inserted_edges,
                                                              removed_edges,
@@ -198,15 +172,12 @@ if __name__ == '__main__':
                 del init_out_edge_dict_sampled
                 torch.cuda.empty_cache()
 
-            else:  # use full graph, randomly add/remove edges
+            else:
                 indices = torch.randperm(all_edges.size(1))
                 edges_before = all_edges[:, indices[:-batch_size // 2]]
                 inserted_edges = all_edges[:, indices[-batch_size // 2:]]
                 removed_edges = all_edges[:, indices[:batch_size // 2]]
-                # Find unique values in each tensor
                 direct_affected_nodes = get_direct_affected_tensor(inserted_edges, removed_edges)
-                # total_affected = affected_nodes_each_layer([edge_dict_full],
-                #                                                    direct_affected_nodes, depth=depth - 1, self_loop=True)
                 intm_before, affected_before = intm_affected(model, data, edges_before, 2, inserted_edges,
                                                              removed_edges, edge_dict_full)
                 del edges_before
@@ -215,31 +186,24 @@ if __name__ == '__main__':
                                                            edge_dict_full)
                 del edges_after
         except torch.cuda.OutOfMemoryError:
-            print(f"Out of memory error for sample {data_dir}")
-            # Clear CUDA memory
             torch.cuda.empty_cache()
             continue
 
         total_affected = affected_before | affected_after
-        total_nodes = len(total_affected)  # use same dict for before and after, so no need to get set union.
+        total_nodes = len(total_affected)  
         changed = 0
-        notsure = 0
         for node in total_affected:
-            if node not in affected_before or node not in affected_after:
-                notsure += 1  # not sure whether changed
-            else:
-                if not torch.all(torch.isclose(intm_before[f"layer{depth}"]["after"][node],
-                                               intm_after[f"layer{depth}"]["after"][node])):
-                    changed += 1
-        print(f"Total/changed/notsure: {total_nodes}/{changed}/{notsure}")
+            if not torch.all(torch.isclose(intm_before[f"layer{depth}"]["after"][node],
+                                           intm_after[f"layer{depth}"]["after"][node])):
+                changed += 1
+        print(f"Total/changed: {total_nodes}/{changed}")
         total_all_cases.append(total_nodes)
         change_all_cases.append(changed)
         notsure_all_cases.append(notsure)
         f.write(
-            f"{batch_size}\t{depth}\t{case_id}\t{total_nodes}\t{changed}\t{notsure}\n")
+            f"{batch_size}\t{depth}\t{case_id}\t{total_nodes}\t{changed}\n")
     total_all_cases = np.array(total_all_cases)
     change_all_cases = np.array(change_all_cases)
     notsure_all_cases = np.array(notsure_all_cases)
     f.write(
-        f"average real:theoretical = {np.mean(change_all_cases / total_all_cases)}, "
-        f"with nosure nodes= {np.mean((notsure_all_cases + change_all_cases) / total_all_cases)}\n")
+        f"average real:theoretical = {np.mean(change_all_cases / total_all_cases)}\n")

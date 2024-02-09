@@ -17,20 +17,15 @@ class pureGCN(torch.nn.Module):  # Only for inference
                              normalize=False, aggr=args.aggr)
 
     def forward(self, x, edge_index, edge_weight=None):
-        if isinstance(edge_index, list):  # used for quiver loader
+        if isinstance(edge_index, list):
             graph_edge_index_1 = edge_index[0][0]
             graph_edge_index_2 = edge_index[1][0]
-            # size_1 = edge_index[0][2]
-            # size_2 = edge_index[1][2]
-            # x_target_1 = x[:size_1[1]]  # Target nodes are always placed first.
-            # x_target_2 = x[:size_2[1]]
-
             x = self.conv1(x, graph_edge_index_1)
             x = x.relu()
             x = self.conv2(x, graph_edge_index_2)
             return x
 
-        else: # edge_index is torch_sparse.SparseTensor, torch.Tensor, or torch.sparse.Tensor
+        else: 
             x = self.conv1(x, edge_index, edge_weight)
             x = x.relu()
             x = self.conv2(x, edge_index, edge_weight)
@@ -43,20 +38,17 @@ def test(model, loader):
 
     total_examples = total_correct = 0
     for batch in tqdm(loader):
-    # for batch in loader:
         batch.to(device)
         batch_size = batch.batch_size
         out = model(batch.x, batch.edge_index)[
             :batch.batch_size]
         if len(batch.y.shape) != 1:
             pred = (out > 1).float()
-            # element-wise compare for each task.
             total_correct += int((pred[:batch_size]
                                  == batch.y[:batch_size]).sum())
-            # classification for each task
             total_examples += batch_size*batch.y.shape[1]
         else:
-            pred = out.argmax(dim=-1)  # one-hot
+            pred = out.argmax(dim=-1)
             total_correct += int((pred[:batch_size]
                                  == batch.y[:batch_size]).sum())
             total_examples += batch_size
@@ -66,14 +58,10 @@ def test(model, loader):
 
 
 def main():
-    # args = FakeArgs(dataset="PubMed", aggr='min')
-    parser = argparse.ArgumentParser()
     args = general_parser(parser)
     dataset = load_dataset(args)
-    # print_dataset(dataset)
     data = dataset[0]
     timing_sampler(data, args)
-    # add_mask(data) # only used for training
 
     if args.dataset == 'papers':
         model = pureGCN(dataset.num_features, 256, dataset.num_classes +1, args).to(device)
@@ -99,7 +87,6 @@ def main():
         if args.dataset in ['papers', "products"]:
             num_eval_nodes = 100000
             node_indices = torch.randperm(data.num_nodes)[:num_eval_nodes]
-            # loader = EgoNetDataLoader(data, node_indices, **kwargs)
             loader = data_loader(data, num_layers=2, num_neighbour_per_layer=-1,
                                  separate=False, input_nodes=node_indices)
             start = time.perf_counter()
@@ -117,10 +104,6 @@ def main():
             end = time.perf_counter()
             print(
                 f'Full Graph. Inference time: {(end - start)/num_iter:.4f} seconds, averaged for {num_iter} iterations.')
-
-        available_model.pop(index_best_model)
-        clean(available_model)
-
 
 if __name__ == '__main__':
     main()

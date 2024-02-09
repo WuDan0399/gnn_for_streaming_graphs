@@ -20,7 +20,7 @@ class GIN(torch.nn.Module):
         self.convs = torch.nn.ModuleList()
         for i in range(num_layers):
             out_c = 64 if i != num_layers - 1 else out_channels
-            mlp = MLP([in_channels, 64, out_c], norm=None)  # original 32
+            mlp = MLP([in_channels, 64, out_c], norm=None)
             self.convs.append(GINConv(mlp, train_eps=False,
                               save_intermediate=self.save_int, aggr=args.aggr))
             in_channels = 64

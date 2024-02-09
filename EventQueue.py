@@ -41,8 +41,6 @@ class EventQueue:
     def bulky_push(self, old_out_neighbors:list, new_out_neighbors:list,
                    old_message:torch.Tensor, new_message:torch.Tensor, aggregator:str="min"):
         if aggregator in ["min", "max"]:
-            # update the task queue, create 'remove' and 'insert' task for all outgoing edges
-            ## Need to clone the messages, otherwise any change on original tensor affects the message in message_buffer
             old_message_idx = self.push_message(old_message.clone())
             new_message_idx = self.push_message(new_message.clone())
             for out_neighbor in old_out_neighbors:

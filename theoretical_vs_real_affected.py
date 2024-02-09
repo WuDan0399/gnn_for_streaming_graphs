@@ -6,15 +6,11 @@ from torch_geometric.data import Data
 
 @torch.no_grad()
 def inference_with_intermediate_value(model, data: Union[pyg.data.Data, pyg.loader.NeighborLoader]) :
-    # Could be pyg.Data or NeighbourLoader
     model.eval()
     if isinstance(data, pyg.data.Data):
-        # print("Using Full Data")
         _, result_each_layer, _ = model(data.x, data.edge_index, data.edge_attr)
 
     elif isinstance(data, pyg.loader.NeighborLoader):
-        # print("Using Neighbour Loader")
-        # inference batches with loader. otherwise the sampling in batch constitution will lead to different result.
         result_each_layer = {}
         for batch in data:
             batch = batch.to(device, 'edge_index')
@@ -22,7 +18,6 @@ def inference_with_intermediate_value(model, data: Union[pyg.data.Data, pyg.load
             _, batch_result_each_layer, _ = model(batch.x, batch.edge_index)
 
             for layer in batch_result_each_layer:
-                # concatenate batch_result_each_layer according to batch.input_id
                 if layer not in result_each_layer :
                     result_each_layer[layer] = batch_result_each_layer[layer][:batch_size].cpu()
                 else:
@@ -74,7 +69,6 @@ def main():
         entries = os.listdir(folder)
         data_folders = [entry for entry in entries if entry.isdigit() and os.path.isdir(os.path.join(folder, entry))]
 
-        # Multiple different data (initial state info and final state info) directory
         for data_dir in tqdm(data_folders[args.it*100: (args.it+1)*100]):
 
             initial_edges = torch.load(osp.join(folder, data_dir, "initial_edges.pt"))
@@ -90,26 +84,22 @@ def main():
             final_out_edge_dict = to_dict(final_edges)
 
             direct_affected_nodes = set([dst for _, dst in inserted_edges + removed_edges])
-            # calculate theoretical affected nodes, use as input_nodes.
             affected_nodes = affected_nodes_each_layer([init_out_edge_dict, final_out_edge_dict],
                                                        direct_affected_nodes, depth=nlayer - 1)
             last_layer_affected_nodes = torch.LongTensor(list(affected_nodes[nlayer - 1]))
 
-            # inference for initial graph
             data2 = Data(x=data.x, edge_index=initial_edges)
             data2.to(device)
             loader = data_loader(data2, num_layers=nlayer, num_neighbour_per_layer=-1, separate=False,
                                  input_nodes=last_layer_affected_nodes)
             init_inter_result = inference_with_intermediate_value(model, loader)
 
-            # inference for final graph
             data3 = Data(x=data.x, edge_index=final_edges)
             data3.to(device)
             loader2 = data_loader(data3, num_layers=nlayer, num_neighbour_per_layer=-1, separate=False,
                                   input_nodes=last_layer_affected_nodes)
             final_inter_result = inference_with_intermediate_value(model, loader2)
 
-            # compare the hidden state in each layer. use is_close function.
             last_layer = "conv2"
             node_is_close = torch.all(torch.isclose(final_inter_result[last_layer], init_inter_result[last_layer],
                                                atol=verification_tolerance), dim=1)

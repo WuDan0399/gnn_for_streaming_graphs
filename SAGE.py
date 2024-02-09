@@ -28,13 +28,10 @@ class SAGE(torch.nn.Module):
             x, intermediate_result = conv(x, edge_index)
 
             if self.save_int:
-                # must contains time info, could contain intermediate
                 intermediate_result_per_layer[f"layer{i+1}"] = intermediate_result
 
             if i < len(self.convs) - 1:
                 x = x.relu()
                 x = F.dropout(x, p=0.5, training=self.training)
             
-            # since out_per_layer is rarely used, I simply remove it.
-
         return x, out_per_layer, intermediate_result_per_layer

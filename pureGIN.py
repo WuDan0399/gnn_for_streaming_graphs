@@ -18,30 +18,20 @@ class pureGIN(torch.nn.Module):
         self.convs = torch.nn.ModuleList()
         for i in range(num_layers):
             out_c = 64 if i!=num_layers-1 else out_channels
-            mlp = MLP([in_channels, 64, out_c], norm=None)  # original 32
+            mlp = MLP([in_channels, 64, out_c], norm=None) 
             self.convs.append(GINConv(mlp, train_eps=False, aggr=args.aggr))
             in_channels = 64
-        # original implementation with global pooling
-        # for _ in range(5):
-        #     mlp = MLP([in_channels, 64, 64], norm=None)  # original 32
-        #     self.convs.append(GINConv(mlp, train_eps=False, aggr=args.aggr))
-        #     in_channels = 64
-        #
-        # self.mlp = MLP([64, 64, out_channels], dropout=0.5)
 
     def forward(self, x, edge_index, batch=None):
-        if isinstance(edge_index, list):  # used for quiver loader
+        if isinstance(edge_index, list):
             for i, (graph_edge_index, _, size) in enumerate(edge_index):
-                # x_target = x[:size[1]]  # Target nodes are always placed first.
                 x = self.convs[i](x, graph_edge_index)
                 x = F.relu(x)
             return x
-        else:  # edge_index is torch_sparse.SparseTensor, torch.Tensor, or torch.sparse.Tensor
+        else:  
             for i, conv in enumerate(self.convs):
                 x = conv(x, edge_index)
                 x = x.relu()
-            # x = global_add_pool(x, batch)
-            # return self.mlp(x)
             return x
 
 
@@ -54,13 +44,10 @@ def train(model, train_loader, optimizer):
         data = data.to(device)
         optimizer.zero_grad()
         out = model(data.x.to(device), data.edge_index.to(device))
-        # classification task with 1 scalar label, cannot be used in training
         y = data.y[:data.batch_size]
         if len(data.y.shape) == 1:
-            # out = out.argmax(dim=-1).float()
             y = torch.nn.functional.one_hot(y.long().to(device), num_classes=out.shape[1])
-        elif data.y.shape[1] == 1: # 2d array but 1 element in each row.
-            # out = out.argmax(dim=-1).reshape((-1,1)).float()
+        elif data.y.shape[1] == 1:
             y = torch.nn.functional.one_hot(y.long().flatten().to(device), num_classes=out.shape[1])
         loss = F.cross_entropy(out[:data.batch_size], y.float())
         loss.backward()
@@ -80,32 +67,28 @@ def test(model, loader):
         data = data.to(device)
         out = model(data.x, data.edge_index)
         batch_y = data.y[:batch_size]
-        if len(batch_y.shape) == 1:  # single label classification
-            pred = out.argmax(dim=-1)  # one-hot
+        if len(batch_y.shape) == 1: 
+            pred = out.argmax(dim=-1) 
             total_correct += int((pred[:batch_size] == batch_y).sum())
             total_examples += batch_size
-        elif batch_y.shape[1] == 1: # single label classification
-            pred = out.argmax(dim=-1)  # one-hot
+        elif batch_y.shape[1] == 1: 
+            pred = out.argmax(dim=-1)
             total_correct += int((pred[:batch_size] == batch_y.flatten()).sum())
             total_examples += batch_size
-        else:  # multi-label classification
+        else:  
             pred = (out > 1).float()
-            # element-wise compare for each task.
             total_correct += int((pred[:batch_size] == batch_y).sum())
-            # classification for each task
             total_examples += batch_size * batch_y.shape[1]
 
     return total_correct / total_examples
 
 
 if __name__ == '__main__':
-    # args = FakeArgs(dataset="reddit", aggr="max", binary=True, epochs=1)
     parser = argparse.ArgumentParser()
     args = general_parser(parser)
     dataset = load_dataset(args)
 
     data = dataset[0]
-    # add_mask(data)
     timing_sampler(data, args)
 
     available_model = []
@@ -120,21 +103,9 @@ if __name__ == '__main__':
         patience = args.patience
         it_patience = 0
 
-        # node_indices = torch.arange(data.num_nodes)
-        # if data.num_nodes > 20000:
-        #     train_indices = node_indices[:int(data.num_nodes * 0.3)]
-        #     test_indices = node_indices[int(
-        #         data.num_nodes * 0.3):int(data.num_nodes * 0.35)]
-        # else:
-        #     train_indices = node_indices[:int(data.num_nodes * 0.8)]
-        #     test_indices = node_indices[int(data.num_nodes * 0.8):]
-        # train_loader = EgoNetDataLoader(data, train_indices, k=5, **kwargs)
-        # test_loader = EgoNetDataLoader(data, test_indices, k=5, **kwargs)
-
         train_loader, val_loader, test_loader = data_loader(data, num_layers=5, num_neighbour_per_layer=10)
 
         sample_batch = next(iter(train_loader))
-        # model = pureGIN(sample_batch.x.shape[1], 2, args).to(device)  # For binary graph classification
         if args.dataset == 'papers':
             model = pureGIN(sample_batch.x.shape[1], dataset.num_classes + 1, args).to(device)
         else:
@@ -143,7 +114,6 @@ if __name__ == '__main__':
 
         for epoch in range(1, args.epochs + 1):
             loss = train(model, train_loader, optimizer)
-            # train_acc = test(model, train_loader)
             test_acc = test(model, test_loader)
             print(
                 f'Epoch: {epoch:03d}, Loss: {loss:.4f}, Test: {test_acc:.4f}')
@@ -166,12 +136,10 @@ if __name__ == '__main__':
 
         num_eval_nodes = 100000
         node_indices = torch.randperm(data.num_nodes)[:num_eval_nodes]
-        # loader = EgoNetDataLoader(data, node_indices, **kwargs)
         loader = data_loader(data, num_layers=5, num_neighbour_per_layer=-1,
                              separate=False, input_nodes=node_indices)
 
         sample_batch = next(iter(loader))
-        # model = pureGIN(sample_batch.x.shape[1], 2).to(device)
         if args.dataset == 'papers':
             model = pureGIN(sample_batch.x.shape[1], dataset.num_classes + 1, args).to(device)
         else:
@@ -183,7 +151,3 @@ if __name__ == '__main__':
         end = time.perf_counter()
         print(
             f'Full Graph. Inference time: {(end - start)*(data.num_nodes/num_eval_nodes):.4f} seconds, averaged for {num_eval_nodes} nodes.')
-        # print(f'Test: {test_acc:.4f}')
-
-        available_model.pop(index_best_model)
-        clean(available_model)

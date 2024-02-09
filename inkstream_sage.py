@@ -26,7 +26,6 @@ class inkstream_sage(inkstream):
             ego_net,
             multi_thread,
         )
-        # manually change the model_config, remove any operation before 1st aggregation function.
         self.model_config = [
             [
                 self.aggregator,
@@ -56,10 +55,9 @@ class inkstream_sage(inkstream):
         it_layer: int = 0,
         node: int = -1,
     ):
-        # print("user_apply")
         if (
             "user" not in events.keys()
-        ):  # left side (aggregated value) changes, right side (h_u) remains the same
+        ): 
             right_side = intm_initial[f"layer{it_layer+1}"]["before"][node].to(
                 device)
         else:
@@ -94,7 +92,7 @@ def main():
     if args.perbatch < 1:
         batch_size = int(
             args.perbatch / 100 * data.num_edges
-        )  # perbatch is [x]%, so divide by 100
+        ) 
     else:
         batch_size = int(args.perbatch)
 
